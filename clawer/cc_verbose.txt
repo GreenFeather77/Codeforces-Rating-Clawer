@@ -1,0 +1,9 @@
+Using built-in specs.
+COLLECT_GCC=C:\msys64\mingw64\bin\cc.exe
+Target: x86_64-w64-mingw32
+Configured with: ../gcc-16.1.0/configure --prefix=/mingw64 --with-local-prefix=/mingw64/local --libexecdir=/mingw64/lib --enable-bootstrap --enable-checking=release --with-arch=nocona --with-tune=generic --enable-mingw-wildcard --enable-languages=c,c++,ada,fortran,lto,objc,obj-c++,jit --enable-shared --enable-static --enable-libatomic --enable-threads=posix --enable-tls --enable-graphite --enable-fully-dynamic-string --enable-libstdcxx-backtrace=yes --enable-libstdcxx-filesystem-ts --enable-libstdcxx-time --disable-libstdcxx-pch --enable-libgomp --disable-libssp --disable-multilib --disable-rpath --disable-win32-registry --disable-nls --disable-werror --disable-symvers --with-libiconv --with-system-zlib --with-gmp=/mingw64 --with-mpfr=/mingw64 --with-mpc=/mingw64 --with-isl=/mingw64 --with-pkgversion='Rev4, Built by MSYS2 project' --with-bugurl=https://github.com/msys2/MINGW-packages/issues --with-gnu-as --with-gnu-ld --with-libstdcxx-zoneinfo=yes --disable-libstdcxx-debug --enable-lto --with-boot-ldflags=-static-libstdc++ --with-stage1-ldflags=-static-libstdc++
+Thread model: posix
+Supported LTO compression algorithms: zlib zstd
+gcc version 16.1.0 (Rev4, Built by MSYS2 project) 
+COLLECT_GCC_OPTIONS='-v' '-c' '-I' 'E:/document/cbigwork/clawer' '-mtune=generic' '-march=nocona'
+ C:/msys64/mingw64/bin/../lib/gcc/x86_64-w64-mingw32/16.1.0/cc1.exe -quiet -v -I E:/document/cbigwork/clawer -iprefix C:/msys64/mingw64/bin/../lib/gcc/x86_64-w64-mingw32/16.1.0/ -D_REENTRANT E:/document/cbigwork/clawer/cf_tool.c -quiet -dumpbase cf_tool.c -dumpbase-ext .c -mtune=generic -march=nocona -version -o C:\Users\Yumao\AppData\Local\Temp\cceQB8gh.s
