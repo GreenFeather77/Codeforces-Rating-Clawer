@@ -1,0 +1,562 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdint.h>
+#include <stdarg.h>
+#include <time.h>
+#include <windows.h>
+#include <shellapi.h>
+#include <curl/curl.h>
+#include "cJSON.h"
+
+#define MAX_HANDLES 100
+#define MAX_CONTESTS 500
+#define MAX_PROBS 15
+#define MAX_SUBMISSIONS 2000
+#define MAX_SOLVED 2000
+
+typedef struct { char handle[64]; int curRating, maxRating; char title[64]; int contestCount, cnt180, max180; } UserInfo;
+typedef struct { int contestId; char contestName[256]; int64_t startTime; int durationSeconds; int oldRating, newRating, rank; int problemCount; char labels[MAX_PROBS][4]; int status[MAX_PROBS]; } Entry;
+typedef struct { int contestId; int64_t time; char index[4]; } Sub;
+typedef struct { char problemId[32]; int rating; int64_t time; } SolvedProb;
+
+typedef struct { char *buf; size_t len; } Buf;
+static char last_error[1024] = {0};
+static void set_last_error(const char *fmt, ...) {
+    va_list ap; va_start(ap, fmt); vsnprintf(last_error, sizeof(last_error), fmt, ap); va_end(ap);
+}
+/* forward declare winhttp fallback used by http_get */
+static char *winhttp_get(const char *url);
+static FILE *dbg_fp = NULL;
+static size_t write_cb(void *p, size_t sz, size_t n, void *u) {
+    Buf *b = u; size_t r = sz * n;
+    char *q = realloc(b->buf, b->len + r + 1); if (!q) return 0;
+    memcpy(q + b->len, p, r); b->len += r; q[b->len] = 0; b->buf = q; return r;
+}
+
+static char *http_get(const char *url) {
+    CURL *c = curl_easy_init(); if (!c) { fprintf(stderr, "curl_easy_init failed\n"); return NULL; }
+    Buf b = {NULL, 0};
+    curl_easy_setopt(c, CURLOPT_URL, url);
+    curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, write_cb);
+    curl_easy_setopt(c, CURLOPT_WRITEDATA, &b);
+    curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(c, CURLOPT_SSL_VERIFYPEER, 0L);
+    curl_easy_setopt(c, CURLOPT_TIMEOUT, 30L);
+    /* Set a default User-Agent and accept compressed responses */
+    curl_easy_setopt(c, CURLOPT_USERAGENT, "cf_tool/1.0");
+    curl_easy_setopt(c, CURLOPT_ACCEPT_ENCODING, "");
+    CURLcode r = curl_easy_perform(c);
+    if (r != CURLE_OK) {
+        set_last_error("curl error for '%s': %s", url, curl_easy_strerror(r));
+        fprintf(stderr, "%s\n", last_error);
+        curl_easy_cleanup(c);
+        if (b.buf) free(b.buf);
+        /* Fall back to WinHTTP on Windows */
+        return winhttp_get(url);
+    }
+    long http_code = 0; curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &http_code);
+    curl_easy_cleanup(c);
+    if (http_code != 200) {
+        set_last_error("HTTP %ld for '%s'", http_code, url);
+        fprintf(stderr, "%s\n", last_error);
+        if (b.buf) free(b.buf);
+        return winhttp_get(url);
+    }
+    return b.buf;
+}
+
+/* Minimal WinHTTP fallback for environments where libcurl fails */
+/* no WinHTTP fallback on mingw for now; keep http_get using libcurl only */
+static char *winhttp_get(const char *url) { (void)url; return NULL; }
+
+static char *cf_api(const char *fmt, ...) {
+    char url[512]; va_list ap; va_start(ap, fmt); vsnprintf(url, 512, fmt, ap); va_end(ap);
+    return http_get(url);
+}
+
+static const char *rcol(int r) {
+    if (r >= 2400) return "#FF0000";
+    if (r >= 2100) return "#FF8C00";
+    if (r >= 1900) return "#AA00AA";
+    if (r >= 1600) return "#0000FF";
+    if (r >= 1400) return "#03A89E";
+    if (r >= 1200) return "#008000";
+    return "#808080";
+}
+
+static void fmt_time(char *buf, int64_t t) { strftime(buf, 64, "%Y-%m-%d %H:%M", localtime((time_t*)&t)); }
+
+static const char *jstr_safe(cJSON *o, const char *k) {
+    if (!o || !k) return "";
+    cJSON *it = cJSON_GetObjectItemCaseSensitive(o, k);
+    if (it && cJSON_IsString(it) && it->valuestring) return it->valuestring;
+    return "";
+}
+#define JNUM(o,k) (cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(o,k)) ? cJSON_GetObjectItemCaseSensitive(o,k)->valueint : 0)
+#define JSTR(o,k) jstr_safe(o,k)
+
+static void copy_str(char *dst, const char *src, size_t dst_size) {
+    if (!dst || dst_size == 0) return;
+    if (!src) { dst[0] = '\0'; return; }
+    strncpy(dst, src, dst_size - 1);
+    dst[dst_size - 1] = '\0';
+}
+
+static void parse_handles(char handles[][64], int *n, const char *src) {
+    char buf[4096]; copy_str(buf, src, sizeof(buf));
+    char *tok = strtok(buf, " ");
+    while (tok && *n < MAX_HANDLES) {
+        copy_str(handles[*n], tok, 64);
+        if (handles[*n][0]) (*n)++;
+        tok = strtok(NULL, " ");
+    }
+}
+
+int main(int argc, char **argv) {
+    SetConsoleOutputCP(CP_UTF8);
+    curl_global_init(CURL_GLOBAL_ALL);
+    dbg_fp = fopen("cf_tool_debug.log", "w");
+    if (dbg_fp) {
+        time_t t = time(NULL); fprintf(dbg_fp, "cf_tool start: %s\n", ctime(&t)); fflush(dbg_fp);
+    }
+
+    char handles[MAX_HANDLES][64];
+    int nhandles = 0;
+
+    if (argc > 1) {
+        for (int i = 1; i < argc && nhandles < MAX_HANDLES; i++) {
+            copy_str(handles[nhandles], argv[i], 64);
+            if (handles[nhandles][0]) nhandles++;
+        }
+        printf("从命令行读取到 %d 个用户\n", nhandles);
+    } else {
+        printf("输入 Codeforces 用户名（多个用空格分隔，一行）: ");
+        char buf[4096];
+        if (!fgets(buf, sizeof(buf), stdin)) return 1;
+        buf[strcspn(buf, "\n")] = 0;
+        parse_handles(handles, &nhandles, buf);
+    }
+    if (nhandles == 0) { printf("没有有效的用户名\n"); return 1; }
+
+    printf("\n=== 步骤 1: 获取用户基本信息 ===\n");
+    char handle_list[4096] = "";
+    for (int i = 0; i < nhandles; i++) { if (i) strcat(handle_list, ";"); strcat(handle_list, handles[i]); }
+    if (dbg_fp) { fprintf(dbg_fp, "handles: %s\n", handle_list); fflush(dbg_fp); }
+
+    char *s = NULL;
+    /* try aggregated user.info with retries */
+    for (int attempt = 0; attempt < 3 && !s; attempt++) {
+        s = cf_api("https://codeforces.com/api/user.info?handles=%s", handle_list);
+        if (!s) { Sleep(1000 * (attempt + 1)); }
+    }
+
+    UserInfo users[MAX_HANDLES];
+    int nusers = 0;
+
+    if (s) {
+        cJSON *root = cJSON_Parse(s);
+        if (!root) { free(s); fprintf(stderr, "解析 user.info 失败\n"); s = NULL; }
+        else {
+            cJSON *result = cJSON_GetObjectItemCaseSensitive(root, "result");
+            cJSON *status = cJSON_GetObjectItemCaseSensitive(root, "status");
+            if (status && cJSON_IsString(status) && strcmp(status->valuestring, "OK") == 0 && result && cJSON_IsArray(result)) {
+                int cnt = cJSON_GetArraySize(result); if (cnt > nhandles) cnt = nhandles;
+                for (int i = 0; i < cnt; i++) {
+                    cJSON *u = cJSON_GetArrayItem(result, i);
+                    const char *h = JSTR(u, "handle");
+                    if (h[0]) {
+                    UserInfo *p = &users[nusers++];
+                        memset(p, 0, sizeof(UserInfo));
+                        copy_str(p->handle, h, sizeof(p->handle));
+                        p->curRating = JNUM(u, "rating");
+                        p->maxRating = JNUM(u, "maxRating");
+                        copy_str(p->title, JSTR(u, "rank"), sizeof(p->title));
+                    }
+                }
+            } else {
+                fprintf(stderr, "user.info 返回格式异常\n");
+            }
+            free(s); cJSON_Delete(root);
+            if (dbg_fp) { fprintf(dbg_fp, "user.info parsed: %d users\n", nusers); fflush(dbg_fp); }
+        }
+    }
+
+    /* If aggregated call failed, try per-handle requests as a fallback */
+    if (!s && nusers == 0) {
+        for (int hi = 0; hi < nhandles; hi++) {
+            char *si = NULL;
+            for (int attempt = 0; attempt < 3 && !si; attempt++) {
+                si = cf_api("https://codeforces.com/api/user.info?handles=%s", handles[hi]);
+                if (!si) Sleep(500);
+            }
+            if (!si) { fprintf(stderr, "无法获取用户 %s 信息: %s\n", handles[hi], last_error); continue; }
+            cJSON *r = cJSON_Parse(si);
+            if (!r) { free(si); continue; }
+            cJSON *status = cJSON_GetObjectItemCaseSensitive(r, "status");
+            cJSON *result = cJSON_GetObjectItemCaseSensitive(r, "result");
+            if (status && cJSON_IsString(status) && strcmp(status->valuestring, "OK") == 0 && result && cJSON_IsArray(result) && cJSON_GetArraySize(result) > 0) {
+                cJSON *u = cJSON_GetArrayItem(result, 0);
+                const char *h = JSTR(u, "handle");
+                if (h[0]) {
+                    UserInfo *p = &users[nusers++]; memset(p, 0, sizeof(UserInfo)); copy_str(p->handle, h, sizeof(p->handle));
+                    p->curRating = JNUM(u, "rating"); p->maxRating = JNUM(u, "maxRating"); copy_str(p->title, JSTR(u, "rank"), sizeof(p->title));
+                }
+            } else {
+                fprintf(stderr, "user.info 非 OK 或无结果: %s\n", handles[hi]);
+            }
+            free(si); cJSON_Delete(r);
+            if (dbg_fp) { fprintf(dbg_fp, "fetched per-user %s, now nusers=%d\n", handles[hi], nusers); fflush(dbg_fp); }
+        }
+    }
+    /* Report any requested handles that were not found by user.info */
+    char missing_handles[MAX_HANDLES][64]; int nmissing = 0;
+    for (int hi = 0; hi < nhandles; hi++) {
+        int found = 0;
+        for (int ui = 0; ui < nusers; ui++) if (strcmp(handles[hi], users[ui].handle) == 0) { found = 1; break; }
+        if (!found) {
+            printf("未找到用户: %s\n", handles[hi]);
+            copy_str(missing_handles[nmissing], handles[hi], sizeof(missing_handles[nmissing])); nmissing++;
+        }
+    }
+    if (nusers == 0) { printf("未找到任何用户，请检查用户名\n"); return 1; }
+
+    printf("\n=== 步骤 2: 获取题目难度信息 ===\n");
+    char *ps_json = cf_api("https://codeforces.com/api/problemset.problems");
+    int *pmap_ids = NULL, *pmap_ratings = NULL, pmap_n = 0;
+    char (*pmap_indices)[4] = NULL;
+    if (ps_json) {
+        cJSON *ps = cJSON_Parse(ps_json);
+        if (ps) {
+            cJSON *res = cJSON_GetObjectItemCaseSensitive(ps, "result");
+            cJSON *probs = res ? cJSON_GetObjectItemCaseSensitive(res, "problems") : NULL;
+            if (probs && cJSON_IsArray(probs)) {
+                int sz = cJSON_GetArraySize(probs);
+                pmap_ids = malloc(sizeof(int) * sz);
+                pmap_ratings = malloc(sizeof(int) * sz);
+                pmap_indices = malloc(sizeof(char[4]) * sz);
+                for (int i = 0; i < sz; i++) {
+                    cJSON *p = cJSON_GetArrayItem(probs, i);
+                    int cid = JNUM(p, "contestId");
+                    const char *idx = JSTR(p, "index");
+                    int rat = JNUM(p, "rating");
+                    if (cid && idx[0] && rat) {
+                        pmap_ids[pmap_n] = cid; pmap_ratings[pmap_n] = rat;
+                        copy_str(pmap_indices[pmap_n], idx, 4);
+                        pmap_n++;
+                    }
+                }
+            } else {
+                printf("problemset.problems 返回格式异常\n");
+            }
+            cJSON_Delete(ps);
+        } else {
+            printf("解析 problemset.problems 失败\n");
+        }
+        free(ps_json);
+    }
+
+    /* 获取 contest.list 一次性数据并保留到后面使用 */
+    char *cl_json_all = cf_api("https://codeforces.com/api/contest.list?gym=false");
+    cJSON *cl_root = NULL; cJSON *cl_arr = NULL; int ncl = 0;
+    if (cl_json_all) {
+        cl_root = cJSON_Parse(cl_json_all);
+        if (cl_root) {
+            cJSON *cres = cJSON_GetObjectItemCaseSensitive(cl_root, "result");
+            if (cres && cJSON_IsArray(cres)) { cl_arr = cres; ncl = cJSON_GetArraySize(cres); }
+            else printf("contest.list 返回格式异常\n");
+        } else {
+            printf("解析 contest.list 失败\n");
+        }
+        free(cl_json_all);
+    }
+
+    printf("\n=== 步骤 3: 获取每个用户的详细数据 ===\n");
+    Entry *entries[MAX_HANDLES]; int nentries[MAX_HANDLES];
+    SolvedProb *solved[MAX_HANDLES]; int nsolved[MAX_HANDLES];
+
+    for (int ui = 0; ui < nusers; ui++) {
+        UserInfo *u = &users[ui];
+        printf("[%d/%d] %s\n", ui + 1, nusers, u->handle);
+        if (dbg_fp) { fprintf(dbg_fp, "--- start user %s (%d/%d) ---\n", u->handle, ui+1, nusers); fflush(dbg_fp); }
+
+        /* user.rating */
+        s = cf_api("https://codeforces.com/api/user.rating?handle=%s", u->handle);
+        cJSON *rt = NULL; cJSON *rt_arr = NULL; int n = 0;
+        if (s) {
+            if (dbg_fp) { fprintf(dbg_fp, "user.rating raw len=%d\n", (int)strlen(s)); fwrite(s, 1, strlen(s) < 200 ? strlen(s) : 200, dbg_fp); fprintf(dbg_fp, "\n----\n"); fflush(dbg_fp); }
+            rt = cJSON_Parse(s);
+            if (rt) {
+                cJSON *rres = cJSON_GetObjectItemCaseSensitive(rt, "result");
+                if (rres && cJSON_IsArray(rres)) { rt_arr = rres; n = cJSON_GetArraySize(rres); if (n > MAX_CONTESTS) n = MAX_CONTESTS; }
+                else { printf("user.rating 数据不包含 result 数组: %s\n", u->handle); }
+            } else { printf("解析 user.rating 失败: %s\n", u->handle); }
+            free(s);
+        }
+        if (dbg_fp) { fprintf(dbg_fp, "user.rating entries=%d\n", n); fflush(dbg_fp); }
+
+        /* user.status (submissions) */
+        char *sub_s = cf_api("https://codeforces.com/api/user.status?handle=%s&from=1&count=%d", u->handle, MAX_SUBMISSIONS);
+        cJSON *sub = NULL; cJSON *sub_arr = NULL; int nsub = 0;
+        if (sub_s) {
+            if (dbg_fp) { fprintf(dbg_fp, "user.status raw len=%d\n", (int)strlen(sub_s)); fwrite(sub_s, 1, strlen(sub_s) < 200 ? strlen(sub_s) : 200, dbg_fp); fprintf(dbg_fp, "\n----\n"); fflush(dbg_fp); }
+            sub = cJSON_Parse(sub_s);
+            if (sub) {
+                cJSON *sres = cJSON_GetObjectItemCaseSensitive(sub, "result");
+                if (sres && cJSON_IsArray(sres)) { sub_arr = sres; nsub = cJSON_GetArraySize(sres); }
+                else { printf("user.status 没有 result 数组: %s\n", u->handle); }
+            } else { printf("解析 user.status 失败: %s\n", u->handle); }
+            free(sub_s);
+        }
+        if (dbg_fp) { fprintf(dbg_fp, "user.status entries=%d\n", nsub); fflush(dbg_fp); }
+
+        Sub *subs = malloc(sizeof(Sub) * (nsub > 0 ? nsub : 1)); int sub_cnt = 0;
+        if (!subs) { fprintf(stderr, "malloc subs failed\n"); if (dbg_fp) fprintf(dbg_fp, "malloc subs failed for %s\n", u->handle); continue; }
+        for (int i = 0; i < nsub; i++) {
+            cJSON *x = cJSON_GetArrayItem(sub_arr, i); if (!x) continue;
+            int cid = JNUM(x, "contestId");
+            cJSON *ct = cJSON_GetObjectItemCaseSensitive(x, "creationTimeSeconds");
+            int64_t tm = (ct && cJSON_IsNumber(ct)) ? (int64_t)ct->valuedouble : 0;
+            const char *vd = JSTR(x, "verdict");
+            cJSON *pr = cJSON_GetObjectItemCaseSensitive(x, "problem");
+            const char *ix = pr ? JSTR(pr, "index") : "";
+            if (cid && tm && vd[0] && ix[0]) {
+                subs[sub_cnt].contestId = cid; subs[sub_cnt].time = tm;
+                copy_str(subs[sub_cnt].index, ix, sizeof(subs[sub_cnt].index)); sub_cnt++;
+            }
+        }
+        if (dbg_fp) { fprintf(dbg_fp, "built subs count=%d\n", sub_cnt); fflush(dbg_fp); }
+        solved[ui] = calloc(MAX_SOLVED, sizeof(SolvedProb));
+        nsolved[ui] = 0;
+        for (int i = 0; i < nsub; i++) {
+            cJSON *x = cJSON_GetArrayItem(sub_arr, i); if (!x) continue;
+            if (strcmp(JSTR(x, "verdict"), "OK") != 0) continue;
+            int cid = JNUM(x, "contestId");
+            cJSON *pr = cJSON_GetObjectItemCaseSensitive(x, "problem");
+            const char *ix = pr ? JSTR(pr, "index") : "";
+            if (!cid || !ix[0]) continue;
+            char pid[32]; snprintf(pid, 32, "%d_%s", cid, ix);
+            int dup = 0;
+            for (int j = 0; j < nsolved[ui]; j++) if (strcmp(solved[ui][j].problemId, pid) == 0) { dup = 1; break; }
+            if (dup) continue;
+            copy_str(solved[ui][nsolved[ui]].problemId, pid, sizeof(solved[ui][nsolved[ui]].problemId));
+            cJSON *ct2 = cJSON_GetObjectItemCaseSensitive(x, "creationTimeSeconds");
+            solved[ui][nsolved[ui]].time = (ct2 && cJSON_IsNumber(ct2)) ? (int64_t)ct2->valuedouble : 0;
+            nsolved[ui]++;
+        }
+
+        entries[ui] = calloc(n > 0 ? n : 1, sizeof(Entry));
+        nentries[ui] = n;
+
+        int64_t now = time(NULL);
+        u->contestCount = n; u->cnt180 = 0; u->max180 = 0;
+
+        for (int i = 0; i < n; i++) {
+            if (!rt_arr) break;
+            cJSON *x = cJSON_GetArrayItem(rt_arr, i); if (!x) continue;
+            Entry *e = &entries[ui][i]; memset(e, 0, sizeof(Entry));
+            int cid = JNUM(x, "contestId");
+            e->contestId = cid;
+            copy_str(e->contestName, JSTR(x, "contestName"), sizeof(e->contestName));
+            e->oldRating = JNUM(x, "oldRating");
+            e->newRating = JNUM(x, "newRating");
+            e->rank = JNUM(x, "rank");
+            cJSON *rt_time = cJSON_GetObjectItemCaseSensitive(x, "ratingUpdateTimeSeconds");
+            e->startTime = (rt_time && cJSON_IsNumber(rt_time)) ? (int64_t)rt_time->valuedouble : 0;
+            e->durationSeconds = 7200;
+
+            for (int k = 0; k < ncl; k++) {
+                cJSON *cl = cJSON_GetArrayItem(cl_arr, k);
+                if (!cl) continue;
+                if (JNUM(cl, "id") == cid) {
+                    cJSON *dur = cJSON_GetObjectItemCaseSensitive(cl, "durationSeconds");
+                    cJSON *stm = cJSON_GetObjectItemCaseSensitive(cl, "startTimeSeconds");
+                    if (dur && cJSON_IsNumber(dur)) e->durationSeconds = dur->valueint;
+                    if (stm && cJSON_IsNumber(stm)) e->startTime = (int64_t)stm->valuedouble;
+                    break;
+                }
+            }
+
+            e->problemCount = 0;
+            for (int k = 0; k < pmap_n && e->problemCount < MAX_PROBS; k++) {
+                if (pmap_ids[k] == cid) {
+                    copy_str(e->labels[e->problemCount], pmap_indices[k], sizeof(e->labels[e->problemCount]));
+                    e->problemCount++;
+                }
+            }
+
+            int64_t end = e->startTime + e->durationSeconds;
+            for (int p = 0; p < sub_cnt; p++) {
+                if (subs[p].contestId != cid) continue;
+                for (int k = 0; k < e->problemCount; k++) {
+                    if (strcmp(subs[p].index, e->labels[k]) == 0) { e->status[k] = (subs[p].time <= end) ? 1 : 2; break; }
+                }
+            }
+
+            if (e->startTime >= now - 180 * 86400LL) { u->cnt180++; if (e->newRating > u->max180) u->max180 = e->newRating; }
+            printf("  %d/%d\r", i + 1, n); fflush(stdout);
+        }
+        printf("\n");
+        free(subs);
+        if (rt) cJSON_Delete(rt);
+    }
+
+    printf("\n=== 步骤 4: 生成报告 ===\n");
+    FILE *fp = fopen("index.html", "w");
+    if (!fp) { printf("无法写入 index.html\n"); return 1; }
+
+    fprintf(fp, "<html><head><meta charset='utf-8'><script src='https://cdn.jsdelivr.net/npm/echarts'></script><style>"
+        "*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Segoe UI',Arial,sans-serif;background:#f0f2f5;color:#333;padding:30px}"
+        ".card{background:#fff;border-radius:12px;padding:24px;margin-bottom:20px;box-shadow:0 2px 12px rgba(0,0,0,.08)}"
+        "h1{font-size:28px;margin-bottom:16px}table{width:100%%;border-collapse:collapse;font-size:14px}"
+        "th{background:#f5f7fa;padding:12px 10px;text-align:left;font-weight:600}td{padding:10px;border-bottom:1px solid #e0e0e0}"
+        "tr:hover{background:#f5f7fa}td a{color:#1565c0;text-decoration:none;font-weight:bold;font-size:15px}"
+        "td a:hover{text-decoration:underline}</style></head><body>"
+        "<div class='card'><h1>Codeforces 用户列表</h1><div><p>共 %d 个用户 | 数据来源: Codeforces API</p></div></div>"
+        "<div class='card' style='overflow-x:auto'><table><thead><tr>"
+        "<th>用户</th><th>当前 Rating</th><th>最高 Rating</th><th>头衔</th><th>参赛次数</th><th>近180天参赛</th><th>近180天最高</th>"
+        "</tr></thead><tbody>", nusers);
+
+    for (int i = 0; i < nusers; i++) {
+        UserInfo *u = &users[i];
+        fprintf(fp, "<tr><td><a href='%s_report.html' style='color:%s'>%s</a></td>"
+            "<td style='color:%s'>%d</td><td style='color:%s'>%d</td><td>%s</td><td>%d</td><td>%d</td><td style='color:%s'>%d</td></tr>\n",
+            u->handle, rcol(u->curRating), u->handle, rcol(u->curRating), u->curRating, rcol(u->maxRating), u->maxRating,
+            u->title, u->contestCount, u->cnt180, rcol(u->max180), u->max180);
+    }
+    fprintf(fp, "</tbody></table></div></body></html>"); fclose(fp);
+    printf("index.html 已生成\n");
+
+    int ranges[] = {0, 800, 1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400, 2600, 2800, 3000, 3500};
+    int nbins = sizeof(ranges)/sizeof(int) - 1;
+    char *range_labels[] = {"<800", "800-999", "1000-1199", "1200-1399", "1400-1599", "1600-1799", "1800-1999", "2000-2199", "2200-2399", "2400-2599", "2600-2799", "2800-2999", "3000+"};
+
+    for (int ui = 0; ui < nusers; ui++) {
+        UserInfo *u = &users[ui];
+        Entry *eu = entries[ui];
+        int n = nentries[ui];
+        char fn[128]; snprintf(fn, 128, "%s_report.html", u->handle);
+        fp = fopen(fn, "w"); if (!fp) continue;
+
+        SolvedProb *su = solved[ui];
+        int ns = nsolved[ui];
+        for (int i = 0; i < ns; i++) {
+            int cid = 0; char idx[8] = ""; sscanf(su[i].problemId, "%d_%s", &cid, idx);
+            for (int k = 0; k < pmap_n; k++) {
+                char pc[32]; snprintf(pc, 32, "%d_%s", pmap_ids[k], idx);
+                if (strcmp(su[i].problemId, pc) == 0) { su[i].rating = pmap_ratings[k]; break; }
+            }
+        }
+
+        int64_t now = time(NULL), cy = now - 365*86400LL, c180 = now - 180*86400LL, cm = now - 30*86400LL;
+        int ba[20]={0}, by[20]={0}, b180[20]={0}, bm[20]={0};
+        for (int i = 0; i < ns; i++) {
+            if (!su[i].rating) continue;
+            for (int b = 0; b < nbins; b++) {
+                if (su[i].rating >= ranges[b] && su[i].rating < ranges[b+1]) {
+                    ba[b]++; if (su[i].time >= cy) by[b]++; if (su[i].time >= c180) b180[b]++; if (su[i].time >= cm) bm[b]++; break;
+                }
+            }
+        }
+
+        fprintf(fp, "<html><head><meta charset='utf-8'><script src='https://cdn.jsdelivr.net/npm/echarts'></script><style>"
+            "*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Segoe UI',Arial,sans-serif;background:#f0f2f5;color:#333;padding:30px}"
+            ".card{background:#fff;border-radius:12px;padding:24px;margin-bottom:20px;box-shadow:0 2px 12px rgba(0,0,0,.08)}"
+            "h1{font-size:28px;margin-bottom:8px}h2{font-size:20px;color:#555;margin-bottom:16px}"
+            ".stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-top:16px}"
+            ".stat{background:#f5f7fa;padding:14px;border-radius:8px;text-align:center}.stat .val{font-size:22px;font-weight:bold}"
+            ".stat .lbl{font-size:12px;color:#888;margin-top:4px}table{width:100%%;border-collapse:collapse;font-size:13px}"
+            "th{background:#f5f7fa;padding:10px 8px;text-align:left;font-weight:600;position:sticky;top:0}"
+            "td{padding:8px;border-bottom:1px solid #e0e0e0}tr:hover{background:#f5f7fa}"
+            ".wrap{display:inline-block;padding:2px 8px;border-radius:4px;font-weight:bold;font-size:12px}"
+            ".green{background:#e8f5e9;color:#2e7d32}.red{background:#ffebee;color:#c62828}.gray{background:#f5f5f5;color:#757575}"
+            ".prob{padding:2px 6px;border-radius:3px;font-size:11px;margin:1px;display:inline-block}"
+            ".prob.ok{background:#e8f5e9;color:#2e7d32}.prob.after{background:#fff3e0;color:#e65100}.prob.no{background:#f5f5f5;color:#bdbdbd}"
+            "td a{color:#1565c0;text-decoration:none}td a:hover{text-decoration:underline}#chart,#hist{width:100%%;height:400px}"
+            "</style></head><body>");
+
+        fprintf(fp, "<div class='card'><h1 style='color:%s'>%s</h1><p style='color:#999'>%s</p><div class='stats'>"
+            "<div class='stat'><div class='val' style='color:%s'>%d</div><div class='lbl'>当前 Rating</div></div>"
+            "<div class='stat'><div class='val' style='color:%s'>%d</div><div class='lbl'>最高 Rating</div></div>"
+            "<div class='stat'><div class='val'>%d</div><div class='lbl'>参赛次数</div></div>"
+            "<div class='stat'><div class='val'>%d</div><div class='lbl'>近180天参赛</div></div>"
+            "<div class='stat'><div class='val' style='color:%s'>%d</div><div class='lbl'>近180天最高</div></div>"
+            "<div class='stat'><div class='val'>%d</div><div class='lbl'>通过题目数</div></div></div></div>",
+            rcol(u->curRating), u->handle, u->title, rcol(u->curRating), u->curRating, rcol(u->maxRating), u->maxRating,
+            u->contestCount, u->cnt180, rcol(u->max180), u->max180, ns);
+
+        fprintf(fp, "<div class='card'><h2>Rating 变化</h2><div id='chart'></div></div><script>"
+            "var chart=echarts.init(document.getElementById('chart'));chart.setOption({backgroundColor:'transparent',"
+            "tooltip:{trigger:'axis',formatter:function(p){return p[0].value}},grid:{left:60,right:20,bottom:30,top:10},"
+            "xAxis:{type:'category',data:[");
+        for (int i = 0; i < n; i++) fprintf(fp, "'%d',", i+1);
+        fprintf(fp, "],axisLabel:{color:'#999'},splitLine:{show:false}},yAxis:{type:'value',axisLabel:{color:'#999'},splitLine:{color:'#e0e0e0'}},"
+            "series:[{type:'line',smooth:true,data:[");
+        for (int i = 0; i < n; i++) fprintf(fp, "%d,", eu[i].newRating);
+        fprintf(fp, "],lineStyle:{width:2},symbol:'none',areaStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,"
+            "colorStops:[{offset:0,color:'rgba(255,0,0,.1)'},{offset:1,color:'rgba(255,0,0,0)'}]}}}]});</script>");
+
+        fprintf(fp, "<div class='card'><h2>通过题目难度分布</h2><div style='margin-bottom:12px'>"
+            "<button onclick='switchHist(0)' style='padding:6px 16px;margin:2px;border:none;border-radius:4px;background:#1565c0;color:#fff;cursor:pointer'>全部</button>"
+            "<button onclick='switchHist(1)' style='padding:6px 16px;margin:2px;border:none;border-radius:4px;background:#e0e0e0;color:#333;cursor:pointer'>最近一年</button>"
+            "<button onclick='switchHist(2)' style='padding:6px 16px;margin:2px;border:none;border-radius:4px;background:#e0e0e0;color:#333;cursor:pointer'>最近180天</button>"
+            "<button onclick='switchHist(3)' style='padding:6px 16px;margin:2px;border:none;border-radius:4px;background:#e0e0e0;color:#333;cursor:pointer'>最近1个月</button>"
+            "</div><div id='hist'></div></div><script>var histData = {all:[");
+        for (int i = 0; i < nbins; i++) fprintf(fp, "%d,", ba[i]);
+        fprintf(fp, "],year:["); for (int i = 0; i < nbins; i++) fprintf(fp, "%d,", by[i]);
+        fprintf(fp, "],d180:["); for (int i = 0; i < nbins; i++) fprintf(fp, "%d,", b180[i]);
+        fprintf(fp, "],month:["); for (int i = 0; i < nbins; i++) fprintf(fp, "%d,", bm[i]);
+        fprintf(fp, "],labels:["); for (int i = 0; i < nbins; i++) fprintf(fp, "'%s',", range_labels[i]);
+        fprintf(fp, "],current:'all'};function switchHist(p){var k=['all','year','d180','month'][p];"
+            "var h=echarts.init(document.getElementById('hist'));h.setOption({backgroundColor:'transparent',"
+            "tooltip:{trigger:'axis'},grid:{left:60,right:20,bottom:30,top:10},"
+            "xAxis:{type:'category',data:histData.labels,axisLabel:{color:'#999',rotate:30},splitLine:{show:false}},"
+            "yAxis:{type:'value',axisLabel:{color:'#999'},splitLine:{color:'#e0e0e0'}},"
+            "series:[{type:'bar',data:histData[k],itemStyle:{color:'#1565c0'}}]});}switchHist(0);</script>");
+
+        fprintf(fp, "<div class='card' style='overflow-x:auto'><h2>比赛记录</h2><table><thead><tr>"
+            "<th>#</th><th>比赛</th><th>日期</th><th>排名</th><th>赛前</th><th>赛后</th><th>变化</th><th>题目</th>"
+            "</tr></thead><tbody>");
+        for (int i = n - 1; i >= 0; i--) {
+            int d = eu[i].newRating - eu[i].oldRating; char tb[64]; fmt_time(tb, eu[i].startTime);
+            fprintf(fp, "<tr><td>%d</td><td><a href='https://codeforces.com/contest/%d' target='_blank'>%s</a></td>"
+                "<td>%s</td><td>%d</td><td style='color:%s'>%d</td><td style='color:%s'>%d</td>"
+                "<td><span class='wrap %s'>%+d</span></td><td>",
+                n - i, eu[i].contestId, eu[i].contestName, tb, eu[i].rank,
+                rcol(eu[i].oldRating), eu[i].oldRating, rcol(eu[i].newRating), eu[i].newRating,
+                d > 0 ? "green" : d < 0 ? "red" : "gray", d);
+            for (int p = 0; p < eu[i].problemCount; p++) {
+                const char *cls = eu[i].status[p]==1?"ok":eu[i].status[p]==2?"after":"no";
+                fprintf(fp, "<span class='prob %s' title='%s: 0 pts'>%s</span> ", cls, eu[i].labels[p], eu[i].labels[p]);
+            }
+            fprintf(fp, "</td></tr>\n");
+        }
+        fprintf(fp, "</tbody></table></div></body></html>"); fclose(fp);
+        printf("  %s 已生成\n", fn);
+    }
+
+    /* If there were missing handles, generate a small report notifying which were not found */
+    if (nmissing > 0) {
+        fp = fopen("missing_users.html", "w"); if (fp) {
+            fprintf(fp, "<html><head><meta charset='utf-8'><title>Missing Users</title></head><body>");
+            fprintf(fp, "<h1>以下用户未找到</h1><ul>");
+            for (int i = 0; i < nmissing; i++) fprintf(fp, "<li>%s</li>", missing_handles[i]);
+            fprintf(fp, "</ul></body></html>"); fclose(fp);
+            printf("missing_users.html 已生成\n");
+        }
+    }
+
+    /* Open index.html in default browser (use cmd start to avoid depending on shellapi header) */
+    {
+        char _cmd[256];
+        snprintf(_cmd, sizeof(_cmd), "start \"\" \"%s\"", "index.html");
+        system(_cmd);
+    }
+
+    for (int i = 0; i < nusers; i++) { free(entries[i]); free(solved[i]); }
+    free(pmap_ids); free(pmap_ratings); free(pmap_indices);
+    curl_global_cleanup();
+    if (dbg_fp) { fprintf(dbg_fp, "cf_tool exiting\n"); fclose(dbg_fp); dbg_fp = NULL; }
+    printf("\n完成！打开 index.html 查看用户列表\n");
+    return 0;
+}
