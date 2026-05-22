@@ -15,7 +15,7 @@
 #define MAX_SUBMISSIONS 2000
 #define MAX_SOLVED 2000
 
-typedef struct { char handle[64]; int curRating, maxRating; char title[64]; int contestCount, cnt180, max180; } UserInfo;
+typedef struct { char handle[64]; char avatar[256]; int curRating, maxRating; char title[64]; int contestCount, cnt180, max180; } UserInfo;
 typedef struct { int contestId; char contestName[256]; int64_t startTime; int durationSeconds; int oldRating, newRating, rank; int problemCount; char labels[MAX_PROBS][4]; int status[MAX_PROBS]; } Entry;
 typedef struct { int contestId; int64_t time; char index[4]; } Sub;
 typedef struct { char problemId[32]; int rating; int64_t time; } SolvedProb;
@@ -166,9 +166,11 @@ int main(int argc, char **argv) {
                     cJSON *u = cJSON_GetArrayItem(result, i);
                     const char *h = JSTR(u, "handle");
                     if (h[0]) {
-                    UserInfo *p = &users[nusers++];
+                        UserInfo *p = &users[nusers++];
                         memset(p, 0, sizeof(UserInfo));
                         copy_str(p->handle, h, sizeof(p->handle));
+                        copy_str(p->avatar, JSTR(u, "titlePhoto"), sizeof(p->avatar));
+                        if (!p->avatar[0]) copy_str(p->avatar, JSTR(u, "avatar"), sizeof(p->avatar));
                         p->curRating = JNUM(u, "rating");
                         p->maxRating = JNUM(u, "maxRating");
                         copy_str(p->title, JSTR(u, "rank"), sizeof(p->title));
@@ -200,6 +202,8 @@ int main(int argc, char **argv) {
                 const char *h = JSTR(u, "handle");
                 if (h[0]) {
                     UserInfo *p = &users[nusers++]; memset(p, 0, sizeof(UserInfo)); copy_str(p->handle, h, sizeof(p->handle));
+                    copy_str(p->avatar, JSTR(u, "titlePhoto"), sizeof(p->avatar));
+                    if (!p->avatar[0]) copy_str(p->avatar, JSTR(u, "avatar"), sizeof(p->avatar));
                     p->curRating = JNUM(u, "rating"); p->maxRating = JNUM(u, "maxRating"); copy_str(p->title, JSTR(u, "rank"), sizeof(p->title));
                 }
             } else {
@@ -274,6 +278,7 @@ int main(int argc, char **argv) {
     printf("\n=== 步骤 3: 获取每个用户的详细数据 ===\n");
     Entry *entries[MAX_HANDLES]; int nentries[MAX_HANDLES];
     SolvedProb *solved[MAX_HANDLES]; int nsolved[MAX_HANDLES];
+    Sub *user_subs_list[MAX_HANDLES]; int user_subs_cnt[MAX_HANDLES];
 
     for (int ui = 0; ui < nusers; ui++) {
         UserInfo *u = &users[ui];
@@ -320,12 +325,15 @@ int main(int argc, char **argv) {
             const char *vd = JSTR(x, "verdict");
             cJSON *pr = cJSON_GetObjectItemCaseSensitive(x, "problem");
             const char *ix = pr ? JSTR(pr, "index") : "";
-            if (cid && tm && vd[0] && ix[0]) {
+            if (cid && tm && vd[0] && ix[0] && strcmp(vd, "OK") == 0) {
                 subs[sub_cnt].contestId = cid; subs[sub_cnt].time = tm;
                 copy_str(subs[sub_cnt].index, ix, sizeof(subs[sub_cnt].index)); sub_cnt++;
             }
         }
         if (dbg_fp) { fprintf(dbg_fp, "built subs count=%d\n", sub_cnt); fflush(dbg_fp); }
+        user_subs_list[ui] = subs;
+        user_subs_cnt[ui] = sub_cnt;
+
         solved[ui] = calloc(MAX_SOLVED, sizeof(SolvedProb));
         nsolved[ui] = 0;
         for (int i = 0; i < nsub; i++) {
@@ -385,46 +393,60 @@ int main(int argc, char **argv) {
                 }
             }
 
-            int64_t end = e->startTime + e->durationSeconds;
-            for (int p = 0; p < sub_cnt; p++) {
-                if (subs[p].contestId != cid) continue;
-                for (int k = 0; k < e->problemCount; k++) {
-                    if (strcmp(subs[p].index, e->labels[k]) == 0) { e->status[k] = (subs[p].time <= end) ? 1 : 2; break; }
-                }
-            }
-
             if (e->startTime >= now - 180 * 86400LL) { u->cnt180++; if (e->newRating > u->max180) u->max180 = e->newRating; }
             printf("  %d/%d\r", i + 1, n); fflush(stdout);
         }
         printf("\n");
-        free(subs);
         if (rt) cJSON_Delete(rt);
+    }
+
+    printf("\n=== 步骤 3.6: 汇总过题状态与赛后补题 ===\n");
+    for (int ui = 0; ui < nusers; ui++) {
+        Entry *eu = entries[ui];
+        Sub *subs = user_subs_list[ui];
+        int sub_cnt = user_subs_cnt[ui];
+        for (int i = 0; i < nentries[ui]; i++) {
+            Entry *e = &eu[i];
+            int64_t end = e->startTime + e->durationSeconds;
+            for (int p = 0; p < e->problemCount; p++) e->status[p] = 0;
+            for (int p = 0; p < sub_cnt; p++) {
+                if (subs[p].contestId != e->contestId) continue;
+                for (int k = 0; k < e->problemCount; k++) {
+                    if (strcmp(subs[p].index, e->labels[k]) == 0) { e->status[k] = (subs[p].time <= end) ? 1 : 2; break; }
+                }
+            }
+        }
+        free(subs);
     }
 
     printf("\n=== 步骤 4: 生成报告 ===\n");
     FILE *fp = fopen("index.html", "w");
     if (!fp) { printf("无法写入 index.html\n"); return 1; }
 
-    fprintf(fp, "<html><head><meta charset='utf-8'><script src='https://cdn.jsdelivr.net/npm/echarts'></script><style>"
-        "*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Segoe UI',Arial,sans-serif;background:#f0f2f5;color:#333;padding:30px}"
-        ".card{background:#fff;border-radius:12px;padding:24px;margin-bottom:20px;box-shadow:0 2px 12px rgba(0,0,0,.08)}"
-        "h1{font-size:28px;margin-bottom:16px}table{width:100%%;border-collapse:collapse;font-size:14px}"
-        "th{background:#f5f7fa;padding:12px 10px;text-align:left;font-weight:600}td{padding:10px;border-bottom:1px solid #e0e0e0}"
-        "tr:hover{background:#f5f7fa}td a{color:#1565c0;text-decoration:none;font-weight:bold;font-size:15px}"
-        "td a:hover{text-decoration:underline}</style></head><body>"
-        "<div class='card'><h1>Codeforces 用户列表</h1><div><p>共 %d 个用户 | 数据来源: Codeforces API</p></div></div>"
+    fprintf(fp, "<html><head><meta charset='utf-8'><title>Codeforces 用户列表</title><style>"
+        "*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background:#f3f4f6;color:#1f2937;padding:40px 20px}"
+        ".container{max-width:1200px;margin:0 auto}"
+        ".card{background:#ffffff;border-radius:16px;padding:32px;margin-bottom:24px;box-shadow:0 4px 6px -1px rgba(0,0,0,.1);border:1px solid #e5e7eb}"
+        "h1{font-size:32px;font-weight:700;margin-bottom:8px;color:#111827}table{width:100%%;border-collapse:separate;border-spacing:0;font-size:15px}"
+        "th{background:#f9fafb;padding:16px;text-align:left;font-weight:600;color:#374151;border-bottom:2px solid #e5e7eb;text-transform:uppercase;font-size:12px;letter-spacing:.05em}"
+        "td{padding:16px;border-bottom:1px solid #e5e7eb;vertical-align:middle}tr:last-child td{border-bottom:none}tr:hover td{background:#f9fafb}"
+        "td a{color:#2563eb;text-decoration:none;font-weight:600}td a:hover{color:#1d4ed8;text-decoration:underline}</style></head><body>"
+        "<div class='container'><div class='card'><h1>Codeforces 用户列表</h1><p style='color:#6b7280;font-size:15px'>共 %d 个用户 | 数据来源: Codeforces API</p></div>"
         "<div class='card' style='overflow-x:auto'><table><thead><tr>"
-        "<th>用户</th><th>当前 Rating</th><th>最高 Rating</th><th>头衔</th><th>参赛次数</th><th>近180天参赛</th><th>近180天最高</th>"
+        "<th>头像</th><th>用户</th><th>当前 Rating</th><th>最高 Rating</th><th>头衔</th><th>参赛次数</th><th>近180天参赛</th><th>近180天最高</th>"
         "</tr></thead><tbody>", nusers);
 
     for (int i = 0; i < nusers; i++) {
         UserInfo *u = &users[i];
-        fprintf(fp, "<tr><td><a href='%s_report.html' style='color:%s'>%s</a></td>"
-            "<td style='color:%s'>%d</td><td style='color:%s'>%d</td><td>%s</td><td>%d</td><td>%d</td><td style='color:%s'>%d</td></tr>\n",
-            u->handle, rcol(u->curRating), u->handle, rcol(u->curRating), u->curRating, rcol(u->maxRating), u->maxRating,
+        fprintf(fp, "<tr><td><img src='%s' width='40' height='40' style='border-radius:50%%;border:2px solid %s;object-fit:cover'></td>"
+            "<td><a href='%s_report.html' style='color:%s;font-size:16px'>%s</a></td>"
+            "<td style='color:%s;font-weight:600'>%d</td><td style='color:%s;font-weight:600'>%d</td><td>%s</td><td>%d</td><td>%d</td><td style='color:%s;font-weight:600'>%d</td></tr>\n",
+            u->avatar, rcol(u->curRating),
+            u->handle, rcol(u->curRating), u->handle,
+            rcol(u->curRating), u->curRating, rcol(u->maxRating), u->maxRating,
             u->title, u->contestCount, u->cnt180, rcol(u->max180), u->max180);
     }
-    fprintf(fp, "</tbody></table></div></body></html>"); fclose(fp);
+    fprintf(fp, "</tbody></table></div></div></body></html>"); fclose(fp);
     printf("index.html 已生成\n");
 
     int ranges[] = {0, 800, 1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400, 2600, 2800, 3000, 3500};
@@ -459,60 +481,71 @@ int main(int argc, char **argv) {
             }
         }
 
-        fprintf(fp, "<html><head><meta charset='utf-8'><script src='https://cdn.jsdelivr.net/npm/echarts'></script><style>"
-            "*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Segoe UI',Arial,sans-serif;background:#f0f2f5;color:#333;padding:30px}"
-            ".card{background:#fff;border-radius:12px;padding:24px;margin-bottom:20px;box-shadow:0 2px 12px rgba(0,0,0,.08)}"
-            "h1{font-size:28px;margin-bottom:8px}h2{font-size:20px;color:#555;margin-bottom:16px}"
-            ".stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-top:16px}"
-            ".stat{background:#f5f7fa;padding:14px;border-radius:8px;text-align:center}.stat .val{font-size:22px;font-weight:bold}"
-            ".stat .lbl{font-size:12px;color:#888;margin-top:4px}table{width:100%%;border-collapse:collapse;font-size:13px}"
-            "th{background:#f5f7fa;padding:10px 8px;text-align:left;font-weight:600;position:sticky;top:0}"
-            "td{padding:8px;border-bottom:1px solid #e0e0e0}tr:hover{background:#f5f7fa}"
-            ".wrap{display:inline-block;padding:2px 8px;border-radius:4px;font-weight:bold;font-size:12px}"
-            ".green{background:#e8f5e9;color:#2e7d32}.red{background:#ffebee;color:#c62828}.gray{background:#f5f5f5;color:#757575}"
-            ".prob{padding:2px 6px;border-radius:3px;font-size:11px;margin:1px;display:inline-block}"
-            ".prob.ok{background:#e8f5e9;color:#2e7d32}.prob.after{background:#fff3e0;color:#e65100}.prob.no{background:#f5f5f5;color:#bdbdbd}"
-            "td a{color:#1565c0;text-decoration:none}td a:hover{text-decoration:underline}#chart,#hist{width:100%%;height:400px}"
-            "</style></head><body>");
+        fprintf(fp, "<html><head><meta charset='utf-8'><title>%s - Codeforces Data</title><script src='https://cdn.jsdelivr.net/npm/echarts'></script><style>"
+            "*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background:#f3f4f6;color:#1f2937;padding:40px 20px}"
+            ".container{max-width:1200px;margin:0 auto}"
+            ".card{background:#ffffff;border-radius:16px;padding:32px;margin-bottom:24px;box-shadow:0 4px 6px -1px rgba(0,0,0,.1);border:1px solid #e5e7eb}"
+            "h1{font-size:32px;font-weight:700;margin-bottom:8px}h2{font-size:20px;font-weight:600;color:#374151;margin-bottom:20px}"
+            ".stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:20px;margin-top:24px}"
+            ".stat{background:#f8fafc;padding:24px;border-radius:12px;text-align:center;border:1px solid #e2e8f0;transition:transform 0.2s,box-shadow 0.2s}"
+            ".stat:hover{transform:translateY(-2px);box-shadow:0 10px 15px -3px rgba(0,0,0,.1)}"
+            ".stat .val{font-size:28px;font-weight:700;margin-bottom:4px}.stat .lbl{font-size:13px;color:#64748b;font-weight:500;text-transform:uppercase;letter-spacing:.05em}"
+            "table{width:100%%;border-collapse:separate;border-spacing:0;font-size:14px}"
+            "th{background:#f9fafb;padding:14px;text-align:left;font-weight:600;position:sticky;top:0;color:#374151;border-bottom:2px solid #e5e7eb}"
+            "td{padding:12px;border-bottom:1px solid #e5e7eb;vertical-align:middle}tr:last-child td{border-bottom:none}tr:hover td{background:#f9fafb}"
+            ".wrap{display:inline-block;padding:4px 10px;border-radius:6px;font-weight:600;font-size:13px}"
+            ".green{background:#dcfce7;color:#166534}.red{background:#fee2e2;color:#991b1b}.gray{background:#f3f4f6;color:#4b5563}"
+            ".prob{padding:4px;border-radius:4px;font-size:12px;margin:2px;display:inline-flex;flex-direction:column;align-items:center;min-width:44px;font-weight:500;border:1px solid transparent;line-height:1.2;gap:2px}"
+            ".prob.ok{background:#dcfce7;color:#166534;border-color:#bbf7d0}.prob.after{background:#fef3c7;color:#92400e;border-color:#fde68a}.prob.no{background:#f3f4f6;color:#4b5563;border-color:#e5e7eb}"
+            "td a{color:#2563eb;text-decoration:none;font-weight:500}td a:hover{color:#1d4ed8;text-decoration:underline}#chart,#hist{width:100%%;height:400px}"
+            ".btn-group{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}"
+            ".btn{padding:8px 16px;border:none;border-radius:6px;font-size:14px;font-weight:500;cursor:pointer;transition:all 0.2s}"
+            ".btn-active{background:#2563eb;color:#fff;box-shadow:0 2px 4px rgba(37,99,235,.2)}.btn-idle{background:#f1f5f9;color:#475569;border:1px solid #e2e8f0}.btn-idle:hover{background:#e2e8f0}"
+            "</style></head><body><div class='container'>", u->handle);
 
-        fprintf(fp, "<div class='card'><h1 style='color:%s'>%s</h1><p style='color:#999'>%s</p><div class='stats'>"
+        fprintf(fp, "<div class='card'><div style='display:flex;align-items:center;gap:20px;margin-bottom:12px'>"
+            "<img src='%s' width='80' height='80' style='border-radius:50%%;border:3px solid %s;object-fit:cover'>"
+            "<div><h1 style='color:%s;margin:0'>%s</h1><p style='color:#6b7280;font-size:16px;margin-top:4px'>%s</p></div></div><div class='stats'>"
             "<div class='stat'><div class='val' style='color:%s'>%d</div><div class='lbl'>当前 Rating</div></div>"
             "<div class='stat'><div class='val' style='color:%s'>%d</div><div class='lbl'>最高 Rating</div></div>"
             "<div class='stat'><div class='val'>%d</div><div class='lbl'>参赛次数</div></div>"
             "<div class='stat'><div class='val'>%d</div><div class='lbl'>近180天参赛</div></div>"
             "<div class='stat'><div class='val' style='color:%s'>%d</div><div class='lbl'>近180天最高</div></div>"
             "<div class='stat'><div class='val'>%d</div><div class='lbl'>通过题目数</div></div></div></div>",
-            rcol(u->curRating), u->handle, u->title, rcol(u->curRating), u->curRating, rcol(u->maxRating), u->maxRating,
+            u->avatar, rcol(u->curRating), rcol(u->curRating), u->handle, u->title, rcol(u->curRating), u->curRating, rcol(u->maxRating), u->maxRating,
             u->contestCount, u->cnt180, rcol(u->max180), u->max180, ns);
 
         fprintf(fp, "<div class='card'><h2>Rating 变化</h2><div id='chart'></div></div><script>"
             "var chart=echarts.init(document.getElementById('chart'));chart.setOption({backgroundColor:'transparent',"
-            "tooltip:{trigger:'axis',formatter:function(p){return p[0].value}},grid:{left:60,right:20,bottom:30,top:10},"
+            "tooltip:{trigger:'axis',formatter:function(p){return p[0].value}},grid:{left:60,right:20,bottom:30,top:20},"
             "xAxis:{type:'category',data:[");
         for (int i = 0; i < n; i++) fprintf(fp, "'%d',", i+1);
-        fprintf(fp, "],axisLabel:{color:'#999'},splitLine:{show:false}},yAxis:{type:'value',axisLabel:{color:'#999'},splitLine:{color:'#e0e0e0'}},"
+        fprintf(fp, "],axisLabel:{color:'#6b7280'},splitLine:{show:false}},yAxis:{type:'value',axisLabel:{color:'#6b7280'},splitLine:{color:'#f3f4f6'}},"
             "series:[{type:'line',smooth:true,data:[");
         for (int i = 0; i < n; i++) fprintf(fp, "%d,", eu[i].newRating);
-        fprintf(fp, "],lineStyle:{width:2},symbol:'none',areaStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,"
-            "colorStops:[{offset:0,color:'rgba(255,0,0,.1)'},{offset:1,color:'rgba(255,0,0,0)'}]}}}]});</script>");
+        fprintf(fp, "],lineStyle:{width:3},symbol:'circle',symbolSize:6,itemStyle:{color:'#2563eb'},areaStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,"
+            "colorStops:[{offset:0,color:'rgba(37,99,235,.2)'},{offset:1,color:'rgba(37,99,235,0)'}]}}}]});</script>");
 
-        fprintf(fp, "<div class='card'><h2>通过题目难度分布</h2><div style='margin-bottom:12px'>"
-            "<button onclick='switchHist(0)' style='padding:6px 16px;margin:2px;border:none;border-radius:4px;background:#1565c0;color:#fff;cursor:pointer'>全部</button>"
-            "<button onclick='switchHist(1)' style='padding:6px 16px;margin:2px;border:none;border-radius:4px;background:#e0e0e0;color:#333;cursor:pointer'>最近一年</button>"
-            "<button onclick='switchHist(2)' style='padding:6px 16px;margin:2px;border:none;border-radius:4px;background:#e0e0e0;color:#333;cursor:pointer'>最近180天</button>"
-            "<button onclick='switchHist(3)' style='padding:6px 16px;margin:2px;border:none;border-radius:4px;background:#e0e0e0;color:#333;cursor:pointer'>最近1个月</button>"
+        fprintf(fp, "<div class='card'><h2>通过题目难度分布</h2><div class='btn-group'>"
+            "<button id='btn0' class='btn btn-active' onclick='switchHist(0)'>全部</button>"
+            "<button id='btn1' class='btn btn-idle' onclick='switchHist(1)'>最近一年</button>"
+            "<button id='btn2' class='btn btn-idle' onclick='switchHist(2)'>最近180天</button>"
+            "<button id='btn3' class='btn btn-idle' onclick='switchHist(3)'>最近1个月</button>"
             "</div><div id='hist'></div></div><script>var histData = {all:[");
         for (int i = 0; i < nbins; i++) fprintf(fp, "%d,", ba[i]);
         fprintf(fp, "],year:["); for (int i = 0; i < nbins; i++) fprintf(fp, "%d,", by[i]);
         fprintf(fp, "],d180:["); for (int i = 0; i < nbins; i++) fprintf(fp, "%d,", b180[i]);
         fprintf(fp, "],month:["); for (int i = 0; i < nbins; i++) fprintf(fp, "%d,", bm[i]);
         fprintf(fp, "],labels:["); for (int i = 0; i < nbins; i++) fprintf(fp, "'%s',", range_labels[i]);
-        fprintf(fp, "],current:'all'};function switchHist(p){var k=['all','year','d180','month'][p];"
+        fprintf(fp, "],current:'all'};function switchHist(p){"
+            "for(var i=0;i<4;i++){var b=document.getElementById('btn'+i);"
+            "b.className=i===p?'btn btn-active':'btn btn-idle';}"
+            "var k=['all','year','d180','month'][p];"
             "var h=echarts.init(document.getElementById('hist'));h.setOption({backgroundColor:'transparent',"
-            "tooltip:{trigger:'axis'},grid:{left:60,right:20,bottom:30,top:10},"
-            "xAxis:{type:'category',data:histData.labels,axisLabel:{color:'#999',rotate:30},splitLine:{show:false}},"
-            "yAxis:{type:'value',axisLabel:{color:'#999'},splitLine:{color:'#e0e0e0'}},"
-            "series:[{type:'bar',data:histData[k],itemStyle:{color:'#1565c0'}}]});}switchHist(0);</script>");
+            "tooltip:{trigger:'axis'},grid:{left:60,right:20,bottom:40,top:20},"
+            "xAxis:{type:'category',data:histData.labels,axisLabel:{color:'#6b7280',rotate:30},splitLine:{show:false}},"
+            "yAxis:{type:'value',axisLabel:{color:'#6b7280'},splitLine:{color:'#f3f4f6'}},"
+            "series:[{type:'bar',data:histData[k],itemStyle:{color:'#3b82f6',borderRadius:[4,4,0,0]}}]});}switchHist(0);</script>");
 
         fprintf(fp, "<div class='card' style='overflow-x:auto'><h2>比赛记录</h2><table><thead><tr>"
             "<th>#</th><th>比赛</th><th>日期</th><th>排名</th><th>赛前</th><th>赛后</th><th>变化</th><th>题目</th>"
@@ -520,28 +553,33 @@ int main(int argc, char **argv) {
         for (int i = n - 1; i >= 0; i--) {
             int d = eu[i].newRating - eu[i].oldRating; char tb[64]; fmt_time(tb, eu[i].startTime);
             fprintf(fp, "<tr><td>%d</td><td><a href='https://codeforces.com/contest/%d' target='_blank'>%s</a></td>"
-                "<td>%s</td><td>%d</td><td style='color:%s'>%d</td><td style='color:%s'>%d</td>"
-                "<td><span class='wrap %s'>%+d</span></td><td>",
+                "<td>%s</td><td>%d</td><td style='color:%s;font-weight:600'>%d</td><td style='color:%s;font-weight:600'>%d</td>"
+                "<td><span class='wrap %s'>%+d</span></td><td style='display:flex;flex-wrap:wrap;gap:4px'>",
                 n - i, eu[i].contestId, eu[i].contestName, tb, eu[i].rank,
                 rcol(eu[i].oldRating), eu[i].oldRating, rcol(eu[i].newRating), eu[i].newRating,
                 d > 0 ? "green" : d < 0 ? "red" : "gray", d);
             for (int p = 0; p < eu[i].problemCount; p++) {
                 const char *cls = eu[i].status[p]==1?"ok":eu[i].status[p]==2?"after":"no";
-                fprintf(fp, "<span class='prob %s' title='%s: 0 pts'>%s</span> ", cls, eu[i].labels[p], eu[i].labels[p]);
+                fprintf(fp, "<div class='prob %s' title='%s'><div style='font-weight:700'>%s</div></div>",
+                    cls, eu[i].labels[p], eu[i].labels[p]);
             }
             fprintf(fp, "</td></tr>\n");
         }
-        fprintf(fp, "</tbody></table></div></body></html>"); fclose(fp);
+        fprintf(fp, "</tbody></table></div></div></body></html>"); fclose(fp);
         printf("  %s 已生成\n", fn);
     }
 
     /* If there were missing handles, generate a small report notifying which were not found */
     if (nmissing > 0) {
         fp = fopen("missing_users.html", "w"); if (fp) {
-            fprintf(fp, "<html><head><meta charset='utf-8'><title>Missing Users</title></head><body>");
+            fprintf(fp, "<html><head><meta charset='utf-8'><title>Missing Users</title><style>"
+                        "*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background:#f3f4f6;color:#1f2937;padding:40px}"
+                        ".card{max-width:600px;margin:0 auto;background:#fff;padding:32px;border-radius:16px;box-shadow:0 4px 6px -1px rgba(0,0,0,.1);border:1px solid #e5e7eb}"
+                        "h1{font-size:24px;margin-bottom:16px;color:#ef4444}ul{list-style-type:disc;padding-left:24px}li{margin-bottom:8px;font-size:16px;color:#4b5563}"
+                        "</style></head><body><div class='card'>");
             fprintf(fp, "<h1>以下用户未找到</h1><ul>");
             for (int i = 0; i < nmissing; i++) fprintf(fp, "<li>%s</li>", missing_handles[i]);
-            fprintf(fp, "</ul></body></html>"); fclose(fp);
+            fprintf(fp, "</ul></div></body></html>"); fclose(fp);
             printf("missing_users.html 已生成\n");
         }
     }
