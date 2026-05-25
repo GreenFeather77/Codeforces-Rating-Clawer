@@ -449,9 +449,9 @@ int main(int argc, char **argv) {
                     ".btn-active{background:#2563eb;color:#fff;box-shadow:0 2px 4px rgba(37,99,235,.2)}.btn-idle{background:#f1f5f9;color:#475569;border:1px solid #e2e8f0}.btn-idle:hover{background:#e2e8f0}"
                     "</style></head><body><div class='container'>", u->handle);
 
-        fprintf(fp, "<div class='card' style='display:flex;flex-wrap:wrap;gap:40px;align-items:center;'><div style='display:flex;align-items:center;gap:20px;'>"
-                    "<img src='%s' width='80' height='80' style='border-radius:50%%;border:3px solid %s;object-fit:cover'>"
-                    "<div><h1 style='color:%s;margin:0'>%s</h1><p style='color:%s;font-size:16px;margin-top:4px;font-weight:600'>%s %s</p></div></div>"
+        fprintf(fp, "<div class='card' style='display:flex;flex-wrap:wrap;gap:40px;align-items:center;'><div style='display:flex;flex-direction:column;align-items:center;gap:12px;min-width:160px;'>"
+                    "<img src='%s' width='120' height='120' style='border-radius:50%%;border:3px solid %s;object-fit:cover'>"
+                    "<div style='text-align:center;'><h1 style='color:%s;margin:0;font-size:28px;'>%s</h1><p style='color:%s;font-size:16px;margin-top:4px;font-weight:600'>%s %s</p></div></div>"
                     "<div class='stats' style='flex:1;margin-top:0;grid-template-columns:repeat(3,1fr);min-width:400px;gap:16px;'>"
                     "<div class='stat'><div class='val' style='color:%s'>%d</div><div class='lbl'>当前等级分</div></div>"
                     "<div class='stat'><div class='val' style='color:%s'>%d</div><div class='lbl'>最高等级分</div></div>"
