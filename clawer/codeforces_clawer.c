@@ -172,9 +172,9 @@ int main(int argc, char **argv) {
         for (int i = 1; i < argc && nhandles < MAX_HANDLES; i++) { cstr(handles[nhandles], argv[i], 64); if (handles[nhandles][0]) nhandles++; }
         printf("已读取到 %d 个用户\n", nhandles);
     } else {
-        print_colored("════════════════════════════════════════\n", FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+        print_colored("═══════════════════════════════════════════\n", FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_INTENSITY);
         print_colored("          Codeforces 用户信息查询        \n", FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_INTENSITY);
-        print_colored("════════════════════════════════════════\n", FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+        print_colored("═══════════════════════════════════════════\n", FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_INTENSITY);
         print_colored("支持多用户查询，用户名之间使用空格间隔\n",   FOREGROUND_GREEN | FOREGROUND_INTENSITY);
         print_colored("最多可同时查询100名用户\n",                  FOREGROUND_RED);
         print_colored("用户名不区分大小写\n",                       FOREGROUND_BLUE | FOREGROUND_INTENSITY);
