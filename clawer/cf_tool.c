@@ -11,8 +11,8 @@
 #define MAX_HANDLES 100
 #define MAX_CONTESTS 500
 #define MAX_PROBS 15
-#define MAX_SUBMISSIONS 2000
-#define MAX_SOLVED 2000
+#define MAX_SUBMISSIONS 20000
+#define MAX_SOLVED 20000
 
 typedef struct { char handle[64]; char avatar[256]; int curRating, maxRating; char title[64]; int contestCount, cnt180, max180; } UserInfo;
 typedef struct { int contestId; char contestName[256]; int64_t startTime; int durationSeconds; int oldRating, newRating, rank; int problemCount; char labels[MAX_PROBS][4]; int status[MAX_PROBS]; } Entry;
@@ -20,13 +20,7 @@ typedef struct { int contestId; int64_t time; char index[4]; } Sub;
 typedef struct { char problemId[32]; int rating; int64_t time; } SolvedProb;
 
 typedef struct { char *buf; size_t len; } Buf;
-static char last_error[1024] = {0};
-static void set_last_error(const char *fmt, ...) {
-    va_list ap; va_start(ap, fmt); vsnprintf(last_error, sizeof(last_error), fmt, ap); va_end(ap);
-}
-/* forward declare winhttp fallback used by http_get */
-static char *winhttp_get(const char *url);
-static FILE *dbg_fp = NULL;
+
 static size_t write_cb(void *p, size_t sz, size_t n, void *u) {
     Buf *b = u; size_t r = sz * n;
     char *q = realloc(b->buf, b->len + r + 1); if (!q) return 0;
@@ -47,27 +41,21 @@ static char *http_get(const char *url) {
     curl_easy_setopt(c, CURLOPT_ACCEPT_ENCODING, "");
     CURLcode r = curl_easy_perform(c);
     if (r != CURLE_OK) {
-        set_last_error("curl error for '%s': %s", url, curl_easy_strerror(r));
-        fprintf(stderr, "%s\n", last_error);
+        fprintf(stderr, "curl error for '%s': %s\n", url, curl_easy_strerror(r));
         curl_easy_cleanup(c);
         if (b.buf) free(b.buf);
-        /* Fall back to WinHTTP on Windows */
-        return winhttp_get(url);
+        return NULL;
     }
     long http_code = 0; curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &http_code);
     curl_easy_cleanup(c);
     if (http_code != 200) {
-        set_last_error("HTTP %ld for '%s'", http_code, url);
-        fprintf(stderr, "%s\n", last_error);
+        fprintf(stderr, "HTTP %ld for '%s'\n", http_code, url);
         if (b.buf) free(b.buf);
-        return winhttp_get(url);
+        return NULL;
     }
     return b.buf;
 }
 
-/* Minimal WinHTTP fallback for environments where libcurl fails */
-/* no WinHTTP fallback on mingw for now; keep http_get using libcurl only */
-static char *winhttp_get(const char *url) { (void)url; return NULL; }
 
 static char *cf_api(const char *fmt, ...) {
     char url[512]; va_list ap; va_start(ap, fmt); vsnprintf(url, 512, fmt, ap); va_end(ap);
@@ -162,10 +150,6 @@ int main(int argc, char **argv) {
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleTitleA("Codeforces 用户信息查询");
     curl_global_init(CURL_GLOBAL_ALL);
-    dbg_fp = fopen("cf_tool_debug.log", "w");
-    if (dbg_fp) {
-        time_t t = time(NULL); fprintf(dbg_fp, "cf_tool start: %s\n", ctime(&t)); fflush(dbg_fp);
-    }
 
     char handles[MAX_HANDLES][64];
     int nhandles = 0;
@@ -197,7 +181,6 @@ int main(int argc, char **argv) {
     printf("\n=== 获取用户基本信息 ===\n");
     char handle_list[4096] = "";
     for (int i = 0; i < nhandles; i++) { if (i) strcat(handle_list, ";"); strcat(handle_list, handles[i]); }
-    if (dbg_fp) { fprintf(dbg_fp, "handles: %s\n", handle_list); fflush(dbg_fp); }
 
     char *s = NULL;
     /* try aggregated user.info with retries */
@@ -235,7 +218,6 @@ int main(int argc, char **argv) {
                 fprintf(stderr, "user.info 返回格式异常\n");
             }
             free(s); cJSON_Delete(root);
-            if (dbg_fp) { fprintf(dbg_fp, "user.info parsed: %d users\n", nusers); fflush(dbg_fp); }
         }
     }
 
@@ -247,7 +229,7 @@ int main(int argc, char **argv) {
                 si = cf_api("https://codeforces.com/api/user.info?handles=%s", handles[hi]);
                 if (!si) Sleep(500);
             }
-            if (!si) { fprintf(stderr, "无法获取用户 %s 信息: %s\n", handles[hi], last_error); continue; }
+            if (!si) { fprintf(stderr, "无法获取用户 %s 信息\n", handles[hi]); continue; }
             cJSON *r = cJSON_Parse(si);
             if (!r) { free(si); continue; }
             cJSON *status = cJSON_GetObjectItemCaseSensitive(r, "status");
@@ -265,7 +247,6 @@ int main(int argc, char **argv) {
                 fprintf(stderr, "user.info 非 OK 或无结果: %s\n", handles[hi]);
             }
             free(si); cJSON_Delete(r);
-            if (dbg_fp) { fprintf(dbg_fp, "fetched per-user %s, now nusers=%d\n", handles[hi], nusers); fflush(dbg_fp); }
         }
     }
     /* Report any requested handles that were not found by user.info */
@@ -299,7 +280,7 @@ int main(int argc, char **argv) {
                     int cid = JNUM(p, "contestId");
                     const char *idx = JSTR(p, "index");
                     int rat = JNUM(p, "rating");
-                    if (cid && idx[0] && rat) {
+                    if (cid && idx[0]) {
                         pmap_ids[pmap_n] = cid; pmap_ratings[pmap_n] = rat;
                         copy_str(pmap_indices[pmap_n], idx, 4);
                         pmap_n++;
@@ -338,13 +319,11 @@ int main(int argc, char **argv) {
     for (int ui = 0; ui < nusers; ui++) {
         UserInfo *u = &users[ui];
         printf("[%d/%d] %s\n", ui + 1, nusers, u->handle);
-        if (dbg_fp) { fprintf(dbg_fp, "--- start user %s (%d/%d) ---\n", u->handle, ui+1, nusers); fflush(dbg_fp); }
 
         /* user.rating */
         s = cf_api("https://codeforces.com/api/user.rating?handle=%s", u->handle);
         cJSON *rt = NULL; cJSON *rt_arr = NULL; int n = 0;
         if (s) {
-            if (dbg_fp) { fprintf(dbg_fp, "user.rating raw len=%d\n", (int)strlen(s)); fwrite(s, 1, strlen(s) < 200 ? strlen(s) : 200, dbg_fp); fprintf(dbg_fp, "\n----\n"); fflush(dbg_fp); }
             rt = cJSON_Parse(s);
             if (rt) {
                 cJSON *rres = cJSON_GetObjectItemCaseSensitive(rt, "result");
@@ -353,13 +332,11 @@ int main(int argc, char **argv) {
             } else { printf("解析 user.rating 失败: %s\n", u->handle); }
             free(s);
         }
-        if (dbg_fp) { fprintf(dbg_fp, "user.rating entries=%d\n", n); fflush(dbg_fp); }
 
         /* user.status (submissions) */
         char *sub_s = cf_api("https://codeforces.com/api/user.status?handle=%s&from=1&count=%d", u->handle, MAX_SUBMISSIONS);
         cJSON *sub = NULL; cJSON *sub_arr = NULL; int nsub = 0;
         if (sub_s) {
-            if (dbg_fp) { fprintf(dbg_fp, "user.status raw len=%d\n", (int)strlen(sub_s)); fwrite(sub_s, 1, strlen(sub_s) < 200 ? strlen(sub_s) : 200, dbg_fp); fprintf(dbg_fp, "\n----\n"); fflush(dbg_fp); }
             sub = cJSON_Parse(sub_s);
             if (sub) {
                 cJSON *sres = cJSON_GetObjectItemCaseSensitive(sub, "result");
@@ -368,10 +345,9 @@ int main(int argc, char **argv) {
             } else { printf("解析 user.status 失败: %s\n", u->handle); }
             free(sub_s);
         }
-        if (dbg_fp) { fprintf(dbg_fp, "user.status entries=%d\n", nsub); fflush(dbg_fp); }
 
         Sub *subs = malloc(sizeof(Sub) * (nsub > 0 ? nsub : 1)); int sub_cnt = 0;
-        if (!subs) { fprintf(stderr, "malloc subs failed\n"); if (dbg_fp) fprintf(dbg_fp, "malloc subs failed for %s\n", u->handle); continue; }
+        if (!subs) { fprintf(stderr, "malloc subs failed\n"); continue; }
         for (int i = 0; i < nsub; i++) {
             cJSON *x = cJSON_GetArrayItem(sub_arr, i); if (!x) continue;
             int cid = JNUM(x, "contestId");
@@ -385,7 +361,6 @@ int main(int argc, char **argv) {
                 copy_str(subs[sub_cnt].index, ix, sizeof(subs[sub_cnt].index)); sub_cnt++;
             }
         }
-        if (dbg_fp) { fprintf(dbg_fp, "built subs count=%d\n", sub_cnt); fflush(dbg_fp); }
         user_subs_list[ui] = subs;
         user_subs_cnt[ui] = sub_cnt;
 
@@ -443,8 +418,41 @@ int main(int argc, char **argv) {
             e->problemCount = 0;
             for (int k = 0; k < pmap_n && e->problemCount < MAX_PROBS; k++) {
                 if (pmap_ids[k] == cid) {
-                    copy_str(e->labels[e->problemCount], pmap_indices[k], sizeof(e->labels[e->problemCount]));
-                    e->problemCount++;
+                    // Check for duplicates before adding
+                    int dup = 0;
+                    for (int m = 0; m < e->problemCount; m++) {
+                        if (strcmp(e->labels[m], pmap_indices[k]) == 0) { dup = 1; break; }
+                    }
+                    if (!dup) {
+                        copy_str(e->labels[e->problemCount], pmap_indices[k], sizeof(e->labels[e->problemCount]));
+                        e->problemCount++;
+                    }
+                }
+            }
+
+            // Fallback: If there are still missing problems that the user submitted to, add them
+             for (int p = 0; p < sub_cnt && e->problemCount < MAX_PROBS; p++) {
+                if (subs[p].contestId == cid) {
+                    int dup = 0;
+                    for (int m = 0; m < e->problemCount; m++) {
+                        if (strcmp(e->labels[m], subs[p].index) == 0) { dup = 1; break; }
+                    }
+                    if (!dup) {
+                        copy_str(e->labels[e->problemCount], subs[p].index, sizeof(e->labels[e->problemCount]));
+                        e->problemCount++;
+                    }
+                }
+            }
+
+            // Sort problem labels alphabetically (A, B, C...)
+            for (int i_str = 0; i_str < e->problemCount - 1; i_str++) {
+                for (int j_str = i_str + 1; j_str < e->problemCount; j_str++) {
+                    if (strcmp(e->labels[i_str], e->labels[j_str]) > 0) {
+                        char tmp[4];
+                        copy_str(tmp, e->labels[i_str], 4);
+                        copy_str(e->labels[i_str], e->labels[j_str], 4);
+                        copy_str(e->labels[j_str], tmp, 4);
+                    }
                 }
             }
 
@@ -660,7 +668,6 @@ int main(int argc, char **argv) {
     for (int i = 0; i < nusers; i++) { free(entries[i]); free(solved[i]); }
     free(pmap_ids); free(pmap_ratings); free(pmap_indices);
     curl_global_cleanup();
-    if (dbg_fp) { fprintf(dbg_fp, "cf_tool exiting\n"); fclose(dbg_fp); dbg_fp = NULL; }
     printf("\n完成！打开 index.html 查看用户列表\n");
     return 0;
 }
