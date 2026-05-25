@@ -85,6 +85,13 @@ static const char *rcol(int r) {
     return "#808080";
 }
 
+static void copy_str(char *dst, const char *src, size_t dst_size) {
+    if (!dst || dst_size == 0) return;
+    if (!src) { dst[0] = '\0'; return; }
+    strncpy(dst, src, dst_size - 1);
+    dst[dst_size - 1] = '\0';
+}
+
 static const char *translate_title(const char *title) {
     if (!title || !title[0]) return "";
     char t[64];
@@ -115,12 +122,6 @@ static const char *jstr_safe(cJSON *o, const char *k) {
 #define JNUM(o,k) (cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(o,k)) ? cJSON_GetObjectItemCaseSensitive(o,k)->valueint : 0)
 #define JSTR(o,k) jstr_safe(o,k)
 
-static void copy_str(char *dst, const char *src, size_t dst_size) {
-    if (!dst || dst_size == 0) return;
-    if (!src) { dst[0] = '\0'; return; }
-    strncpy(dst, src, dst_size - 1);
-    dst[dst_size - 1] = '\0';
-}
 
 static void parse_handles(char handles[][64], int *n, const char *src) {
     char buf[4096]; copy_str(buf, src, sizeof(buf));
