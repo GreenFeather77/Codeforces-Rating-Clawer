@@ -92,6 +92,16 @@ static void copy_str(char *dst, const char *src, size_t dst_size) {
     dst[dst_size - 1] = '\0';
 }
 
+static int strcasecmp_custom(const char *s1, const char *s2) {
+    while (*s1 && *s2) {
+        int c1 = *s1 >= 'A' && *s1 <= 'Z' ? *s1 + 32 : *s1;
+        int c2 = *s2 >= 'A' && *s2 <= 'Z' ? *s2 + 32 : *s2;
+        if (c1 != c2) return c1 - c2;
+        s1++; s2++;
+    }
+    return *s1 - *s2;
+}
+
 static const char *translate_title(const char *title) {
     if (!title || !title[0]) return "";
     char t[64];
@@ -152,7 +162,10 @@ int main(int argc, char **argv) {
         printf("已读取到 %d 个用户\n", nhandles);
     } else {
         printf("Codeforces用户信息查询 \n");
+
         printf("(支持多用户查询，如有多个用户，用户名之间使用空格间隔)\n");
+        printf("(最多可同时查询100名用户) \n");
+        printf("(用户名不区分大小写) \n");
         printf("输入 Codeforces 用户名: \n");
 
         char buf[4096];
@@ -240,7 +253,7 @@ int main(int argc, char **argv) {
     char missing_handles[MAX_HANDLES][64]; int nmissing = 0;
     for (int hi = 0; hi < nhandles; hi++) {
         int found = 0;
-        for (int ui = 0; ui < nusers; ui++) if (strcmp(handles[hi], users[ui].handle) == 0) { found = 1; break; }
+        for (int ui = 0; ui < nusers; ui++) if (strcasecmp_custom(handles[hi], users[ui].handle) == 0) { found = 1; break; }
         if (!found) {
             printf("未找到用户: %s\n", handles[hi]);
             copy_str(missing_handles[nmissing], handles[hi], sizeof(missing_handles[nmissing])); nmissing++;
@@ -454,9 +467,9 @@ int main(int argc, char **argv) {
         "th{background:#f9fafb;padding:16px;text-align:left;font-weight:600;color:#374151;border-bottom:2px solid #e5e7eb;text-transform:uppercase;font-size:12px;letter-spacing:.05em}"
         "td{padding:16px;border-bottom:1px solid #e5e7eb;vertical-align:middle}tr:last-child td{border-bottom:none}tr:hover td{background:#f9fafb}"
         "td a{color:#2563eb;text-decoration:none;font-weight:600}td a:hover{color:#1d4ed8;text-decoration:underline}</style></head><body>"
-        "<div class='container'><div class='card'><h1>Codeforces 用户列表</h1><p style='color:#6b7280;font-size:15px'>共 %d 个用户 | 数据来源: Codeforces API</p></div>"
+        "<div class='container'><div class='card'><h1>Codeforces 用户列表</h1><p style='color:#6b7280;font-size:15px'>共 %d 个用户 | 数据来源: Codeforces API</p><p style='color:#6b7280;font-size:15px'>点击用户名查看详情</p></div>"
         "<div class='card' style='overflow-x:auto'><table><thead><tr>"
-        "<th>头像</th><th>用户</th><th>当前 Rating</th><th>最高 Rating</th><th>头衔</th><th>参赛次数</th><th>近180天参赛</th><th>近180天最高</th>"
+        "<th>头像</th><th>用户</th><th>当前等级分</th><th>最高等级分</th><th>头衔</th><th>参赛次数</th><th>近180天参赛</th><th>近180天最高</th>"
         "</tr></thead><tbody>", nusers);
 
     for (int i = 0; i < nusers; i++) {
@@ -529,8 +542,8 @@ int main(int argc, char **argv) {
         fprintf(fp, "<div class='card'><div style='display:flex;align-items:center;gap:20px;margin-bottom:12px'>"
             "<img src='%s' width='80' height='80' style='border-radius:50%%;border:3px solid %s;object-fit:cover'>"
             "<div><h1 style='color:%s;margin:0'>%s</h1><p style='color:%s;font-size:16px;margin-top:4px;font-weight:600'>%s %s</p></div></div><div class='stats'>"
-            "<div class='stat'><div class='val' style='color:%s'>%d</div><div class='lbl'>当前 Rating</div></div>"
-            "<div class='stat'><div class='val' style='color:%s'>%d</div><div class='lbl'>最高 Rating</div></div>"
+            "<div class='stat'><div class='val' style='color:%s'>%d</div><div class='lbl'>当前等级分</div></div>"
+            "<div class='stat'><div class='val' style='color:%s'>%d</div><div class='lbl'>最高等级分</div></div>"
             "<div class='stat'><div class='val'>%d</div><div class='lbl'>参赛次数</div></div>"
             "<div class='stat'><div class='val'>%d</div><div class='lbl'>近180天参赛</div></div>"
             "<div class='stat'><div class='val' style='color:%s'>%d</div><div class='lbl'>近180天最高</div></div>"
@@ -538,7 +551,7 @@ int main(int argc, char **argv) {
             u->avatar, rcol(u->curRating), rcol(u->curRating), u->handle, rcol(u->curRating), u->title, translate_title(u->title), rcol(u->curRating), u->curRating, rcol(u->maxRating), u->maxRating,
             u->contestCount, u->cnt180, rcol(u->max180), u->max180, ns);
 
-        fprintf(fp, "<div class='card'><h2>Rating 变化</h2><div id='chart'></div></div><script>"
+        fprintf(fp, "<div class='card'><h2>等级分变化</h2><div id='chart'></div></div><script>"
             "var chart=echarts.init(document.getElementById('chart'));chart.setOption({backgroundColor:'transparent',"
             "tooltip:{trigger:'axis'},grid:{left:60,right:20,bottom:30,top:20},"
             "xAxis:{type:'category',data:[");
