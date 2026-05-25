@@ -175,6 +175,8 @@ int main(int argc, char **argv) {
         print_colored("═══════════════════════════════════════════\n", FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_INTENSITY);
         print_colored("          Codeforces 用户信息查询        \n", FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_INTENSITY);
         print_colored("═══════════════════════════════════════════\n", FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+        print_colored("    湘潭大学  2025级计算机科学与技术1班   陈羽\n",  FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+        print_colored("═══════════════════════════════════════════\n", FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_INTENSITY);
         print_colored("支持多用户查询，用户名之间使用空格间隔\n",   FOREGROUND_GREEN | FOREGROUND_INTENSITY);
         print_colored("最多可同时查询100名用户\n",                  FOREGROUND_RED);
         print_colored("用户名不区分大小写\n",                       FOREGROUND_BLUE | FOREGROUND_INTENSITY);
@@ -399,7 +401,7 @@ int main(int argc, char **argv) {
         }
 
         // 输出单用户报告的头部基础结构和统计面板数据
-        fprintf(fp, "<html><head><meta charset='utf-8'><title>%s - Codeforces Data</title><script src='https://cdn.jsdelivr.net/npm/echarts'></script><style>"
+        fprintf(fp, "<html><head><meta charset='utf-8'><title>%s - Codeforces Data</title><script src='https://fastly.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js'></script><style>"
                     "*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background:#f3f4f6;color:#1f2937;padding:40px 20px}"
                     ".container{max-width:1200px;margin:0 auto}"
                     ".card{background:#ffffff;border-radius:16px;padding:32px;margin-bottom:24px;box-shadow:0 4px 6px -1px rgba(0,0,0,.1);border:1px solid #e5e7eb}"
