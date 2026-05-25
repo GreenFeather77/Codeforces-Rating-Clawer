@@ -24,7 +24,10 @@
   </component>
   <component name="CMakeWorkspace" PROJECT_DIR="$PROJECT_DIR$" />
   <component name="ChangeListManager">
-    <list default="true" id="afaa23a0-99de-4db9-9a53-53570a655725" name="更改" comment="3.6" />
+    <list default="true" id="afaa23a0-99de-4db9-9a53-53570a655725" name="更改" comment="3.7">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/cf_tool.c" beforeDir="false" afterPath="$PROJECT_DIR$/cf_tool.c" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -124,7 +127,7 @@
       <workItem from="1779452324266" duration="2933000" />
       <workItem from="1779677787864" duration="4802000" />
       <workItem from="1779684078851" duration="1530000" />
-      <workItem from="1779699771634" duration="3406000" />
+      <workItem from="1779699771634" duration="5157000" />
     </task>
     <task id="LOCAL-00001" summary="1.0">
       <option name="closed" value="true" />
@@ -222,7 +225,31 @@
       <option name="project" value="LOCAL" />
       <updated>1779710268448</updated>
     </task>
-    <option name="localTasksCounter" value="13" />
+    <task id="LOCAL-00013" summary="3.7">
+      <option name="closed" value="true" />
+      <created>1779710443507</created>
+      <option name="number" value="00013" />
+      <option name="presentableId" value="LOCAL-00013" />
+      <option name="project" value="LOCAL" />
+      <updated>1779710443507</updated>
+    </task>
+    <task id="LOCAL-00014" summary="3.7">
+      <option name="closed" value="true" />
+      <created>1779710544477</created>
+      <option name="number" value="00014" />
+      <option name="presentableId" value="LOCAL-00014" />
+      <option name="project" value="LOCAL" />
+      <updated>1779710544477</updated>
+    </task>
+    <task id="LOCAL-00015" summary="3.7">
+      <option name="closed" value="true" />
+      <created>1779711006176</created>
+      <option name="number" value="00015" />
+      <option name="presentableId" value="LOCAL-00015" />
+      <option name="project" value="LOCAL" />
+      <updated>1779711006176</updated>
+    </task>
+    <option name="localTasksCounter" value="16" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -255,7 +282,8 @@
     <MESSAGE value="3.1" />
     <MESSAGE value="3.5" />
     <MESSAGE value="3.6" />
-    <option name="LAST_COMMIT_MESSAGE" value="3.6" />
+    <MESSAGE value="3.7" />
+    <option name="LAST_COMMIT_MESSAGE" value="3.7" />
   </component>
   <component name="github-copilot-workspace">
     <instructionFileLocations>

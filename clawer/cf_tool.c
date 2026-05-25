@@ -25,7 +25,7 @@ typedef struct { char problemId[32]; int rating; int64_t time; } SolvedProb;
 // 用于 cURL 动态内存分配的缓冲区结构
 typedef struct { char *buf; size_t len; } Buf;
 
-// libcurl 的写回调函数：将网络下载的数据自动拼接到 Buf 结构中
+// libcurl 的写回调函数
 static size_t write_cb(void *p, size_t sz, size_t n, void *u) {
     Buf *b = u; size_t r = sz * n;
     char *q = realloc(b->buf, b->len + r + 1); if (!q) return 0;
@@ -57,12 +57,6 @@ static char *cf_api(const char *fmt, ...) {
     return http_get(url);
 }
 
-/** @} */
-
-/** @name Console Helper Functions
-  * @{
-  */
-
 // 获取分数对应的颜色代码（用于HTML渲染和等级区分）
 static const char *rcol(int r) {
     if (r >= 2400) return "#FF0000"; if (r >= 2100) return "#FF8C00";
@@ -82,12 +76,6 @@ static void print_colored(const char *text, WORD color) {
     if (h != INVALID_HANDLE_VALUE) SetConsoleTextAttribute(h, old);
 }
 
-/** @} */
-
-/** @name String & Time Helper Functions
-  * @{
-  */
-
 // 安全的字符串复制函数：防止越界，并确保总以 '\0' 结尾
 static void cstr(char *dst, const char *src, size_t n) {
     if (!dst || !n) return;
@@ -95,7 +83,7 @@ static void cstr(char *dst, const char *src, size_t n) {
     strncpy(dst, src, n - 1); dst[n - 1] = 0;
 }
 
-// 将秒级时间戳格式化为可读字符串 "YYYY-MM-DD HH:MM"
+// 将秒级时间戳格式化为可读字符串
 static void fmt_time(char *buf, int64_t t) {
     time_t tt = (time_t)t; struct tm tmv;
     localtime_s(&tmv, &tt); strftime(buf, 64, "%Y-%m-%d %H:%M", &tmv);
@@ -109,29 +97,17 @@ static void parse_handles(char handles[][64], int *n, const char *src) {
     }
 }
 
-/** @} */
-
-/** @name JSON Helper Functions
-  * @{
-  */
-
-// 从 cJSON 对象中安全提取字符串类型字段
+// 从 cJSON 对象中提取字符串类型字段
 static const char *jstr(cJSON *o, const char *k) {
     cJSON *it = o ? cJSON_GetObjectItemCaseSensitive(o, k) : NULL;
     return (it && cJSON_IsString(it) && it->valuestring) ? it->valuestring : "";
 }
 
-// 从 cJSON 对象中安全提取数值类型字段
+// 从 cJSON 对象中提取数值类型字段
 static int jnum(cJSON *o, const char *k) {
     cJSON *it = o ? cJSON_GetObjectItemCaseSensitive(o, k) : NULL;
     return (it && cJSON_IsNumber(it)) ? it->valueint : 0;
 }
-
-/** @} */
-
-/** @name Translation Functions
-  * @{
-  */
 
 // 将 Codeforces 常用英文头衔翻译为中文词汇
 static const char *translate_title(const char *title) {
@@ -191,7 +167,7 @@ int main(int argc, char **argv) {
 
     char handles[MAX_HANDLES][64]; int nhandles = 0;
 
-    // === 步骤 1：获取与解析输入的用户名 ===
+    // === 获取与解析输入的用户名 ===
     if (argc > 1) {
         for (int i = 1; i < argc && nhandles < MAX_HANDLES; i++) { cstr(handles[nhandles], argv[i], 64); if (handles[nhandles][0]) nhandles++; }
         printf("已读取到 %d 个用户\n", nhandles);
@@ -211,7 +187,7 @@ int main(int argc, char **argv) {
     if (!nhandles) { printf("未识别到有效的用户名\n"); return 1; }
 
     printf("\n=== 获取用户基本信息 ===\n");
-    // === 步骤 2：请求 user.info 取用户基本数据 ===
+    // === 请求 user.info 取用户基本数据 ===
     char handle_list[4096] = "";
     for (int i = 0; i < nhandles; i++) { if (i) strcat(handle_list, ";"); strcat(handle_list, handles[i]); }
 
@@ -241,7 +217,7 @@ int main(int argc, char **argv) {
     if (!nusers) { printf("未找到任何用户，请检查用户名\n"); return 1; }
 
     printf("\n=== 获取题目信息 ===\n");
-    // === 步骤 3：拉取 problemset.problems，建立题目对应其难度分数的映射 ===
+    // === 拉取 problemset.problems，建立题目对应其难度分数的映射 ===
     int *pmap_ids = NULL, *pmap_ratings = NULL, pmap_n = 0;
     char (*pmap_indices)[4] = NULL;
     s = cf_api("https://codeforces.com/api/problemset.problems");
@@ -263,7 +239,7 @@ int main(int argc, char **argv) {
         }
     }
 
-    // === 步骤 4：拉取 contest.list，映射每场比赛的时长与开始时间等属性 ===
+    // === 拉取 contest.list，映射每场比赛的时长与开始时间属性 ===
     cJSON *cl_root = NULL, *cl_arr = NULL; int ncl = 0;
     s = cf_api("https://codeforces.com/api/contest.list?gym=false");
     if (s) {
@@ -272,7 +248,7 @@ int main(int argc, char **argv) {
     }
 
     printf("\n=== 获取用户详细数据 ===\n");
-    // === 步骤 5：按用户分别拉取 rating 记录与状态提交记录 ===
+    // === 按用户分别拉取 rating 记录与状态提交记录 ===
     Entry *entries[MAX_HANDLES]; int nentries[MAX_HANDLES];
     SolvedProb *solved[MAX_HANDLES]; int nsolved[MAX_HANDLES];
 
@@ -360,7 +336,7 @@ int main(int argc, char **argv) {
     }
 
     printf("\n=== 生成报告 ===\n");
-    // === 步骤 6：生成用户列表主页 index.html ===
+    // === 生成用户列表主页 index.html ===
     FILE *fp = fopen("index.html", "w");
     if (!fp) { printf("无法写入 index.html\n"); return 1; }
 
@@ -395,7 +371,7 @@ int main(int argc, char **argv) {
     int nbins = sizeof(ranges)/sizeof(int) - 1;
     char *range_labels[] = {"<800","800-999","1000-1199","1200-1399","1400-1599","1600-1799","1800-1999","2000-2199","2200-2399","2400-2599","2600-2799","2800-2999","3000+"};
 
-    // === 步骤 7：为每位用户单独生成对应的数据报告 HTML (采用 ECharts 展现) ===
+    // === 为每位用户单独生成对应的数据报告 HTML (用 ECharts) ===
     for (int ui = 0; ui < nusers; ui++) {
         UserInfo *u = &users[ui]; Entry *eu = entries[ui]; int n = nentries[ui];
         char fn[128]; snprintf(fn, 128, "%s_report.html", u->handle);
@@ -514,7 +490,7 @@ int main(int argc, char **argv) {
         printf("  %s 已生成\n", fn);
     }
 
-    // === 步骤 8：如有未找到的用户，生成 missing_users.html 报告未找到的用户名单 ===
+    // === 如有未找到的用户，生成 missing_users.html 报告未找到的用户名单 ===
     if (nmissing > 0) {
         fp = fopen("missing_users.html", "w");
         if (fp) {
@@ -529,13 +505,13 @@ int main(int argc, char **argv) {
         }
     }
 
-    // === 步骤 9：打开生成的默认主页报告页面 ===
+    // === 打开生成的默认主页报告页面 ===
     char cmd[256];
     if (nusers == 1) snprintf(cmd, sizeof(cmd), "start \"\" \"%s_report.html\"", users[0].handle);
     else cstr(cmd, "start \"\" \"index.html\"", sizeof(cmd));
     system(cmd);
 
-    // === 步骤 10：进行内存释放及所有的资源清理 ===
+    // === 内存释放及资源清理 ===
     for (int i = 0; i < nusers; i++) { free(entries[i]); free(solved[i]); }
     free(pmap_ids); free(pmap_ratings); free(pmap_indices);
     if (cl_root) cJSON_Delete(cl_root);
