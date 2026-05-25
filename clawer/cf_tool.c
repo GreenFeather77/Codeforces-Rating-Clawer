@@ -14,18 +14,29 @@
 #define MAX_SUBMISSIONS 20000
 #define MAX_SOLVED      20000
 
+// 存储单个用户的基本信息：用户名、头像、头衔及参赛统计
 typedef struct { char handle[64], avatar[256], title[64]; int curRating, maxRating, contestCount, cnt180, max180; } UserInfo;
+// 存储用户单场比赛的记录：各项数据、题目列表及各题状态
 typedef struct { int contestId, durationSeconds, oldRating, newRating, rank, problemCount; int64_t startTime; char contestName[256], labels[MAX_PROBS][4]; int status[MAX_PROBS]; } Entry;
+// 存储单次提交记录的关键信息：比赛ID、提交时间和题目编号
 typedef struct { int contestId; int64_t time; char index[4]; } Sub;
+// 存储已解决题目(AC)的信息：拼接后的唯一题目ID、难度分及通过时间
 typedef struct { char problemId[32]; int rating; int64_t time; } SolvedProb;
+// 用于 cURL 动态内存分配的缓冲区结构
 typedef struct { char *buf; size_t len; } Buf;
 
+/** @name Codeforces API Helper Functions
+  * @{
+  */
+
+// libcurl 的写回调函数：将网络下载的数据自动拼接到 Buf 结构中
 static size_t write_cb(void *p, size_t sz, size_t n, void *u) {
     Buf *b = u; size_t r = sz * n;
     char *q = realloc(b->buf, b->len + r + 1); if (!q) return 0;
     memcpy(q + b->len, p, r); b->len += r; q[b->len] = 0; b->buf = q; return r;
 }
 
+// 封装的 HTTP GET 函数：拉取指定URL内容并返回分配的字符串，失败返回 NULL
 static char *http_get(const char *url) {
     CURL *c = curl_easy_init(); if (!c) return NULL;
     Buf b = {NULL, 0};
@@ -44,11 +55,19 @@ static char *http_get(const char *url) {
     return b.buf;
 }
 
+// 封装的 Codeforces API 调用：支持类似 printf 的参数格式化后进行 GET 请求
 static char *cf_api(const char *fmt, ...) {
     char url[512]; va_list ap; va_start(ap, fmt); vsnprintf(url, 512, fmt, ap); va_end(ap);
     return http_get(url);
 }
 
+/** @} */
+
+/** @name Console Helper Functions
+  * @{
+  */
+
+// 获取分数对应的颜色代码（用于HTML渲染和等级区分）
 static const char *rcol(int r) {
     if (r >= 2400) return "#FF0000"; if (r >= 2100) return "#FF8C00";
     if (r >= 1900) return "#AA00AA"; if (r >= 1600) return "#0000FF";
@@ -56,6 +75,7 @@ static const char *rcol(int r) {
     return "#808080";
 }
 
+// 在控制台输出带颜色的文本段落
 static void print_colored(const char *text, WORD color) {
     HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
     CONSOLE_SCREEN_BUFFER_INFO info;
@@ -66,22 +86,58 @@ static void print_colored(const char *text, WORD color) {
     if (h != INVALID_HANDLE_VALUE) SetConsoleTextAttribute(h, old);
 }
 
+/** @} */
+
+/** @name String & Time Helper Functions
+  * @{
+  */
+
+// 安全的字符串复制函数：防止越界，并确保总以 '\0' 结尾
 static void cstr(char *dst, const char *src, size_t n) {
     if (!dst || !n) return;
     if (!src) { dst[0] = 0; return; }
     strncpy(dst, src, n - 1); dst[n - 1] = 0;
 }
 
+// 将秒级时间戳格式化为可读字符串 "YYYY-MM-DD HH:MM"
+static void fmt_time(char *buf, int64_t t) {
+    time_t tt = (time_t)t; struct tm tmv;
+    localtime_s(&tmv, &tt); strftime(buf, 64, "%Y-%m-%d %H:%M", &tmv);
+}
+
+// 解析以空格隔开的用户名字符串到 handles 数组中
+static void parse_handles(char handles[][64], int *n, const char *src) {
+    char buf[4096]; cstr(buf, src, sizeof(buf));
+    for (char *tok = strtok(buf, " "); tok && *n < MAX_HANDLES; tok = strtok(NULL, " ")) {
+        cstr(handles[*n], tok, 64); if (handles[*n][0]) (*n)++;
+    }
+}
+
+/** @} */
+
+/** @name JSON Helper Functions
+  * @{
+  */
+
+// 从 cJSON 对象中安全提取字符串类型字段
 static const char *jstr(cJSON *o, const char *k) {
     cJSON *it = o ? cJSON_GetObjectItemCaseSensitive(o, k) : NULL;
     return (it && cJSON_IsString(it) && it->valuestring) ? it->valuestring : "";
 }
 
+// 从 cJSON 对象中安全提取数值类型字段
 static int jnum(cJSON *o, const char *k) {
     cJSON *it = o ? cJSON_GetObjectItemCaseSensitive(o, k) : NULL;
     return (it && cJSON_IsNumber(it)) ? it->valueint : 0;
 }
 
+/** @} */
+
+/** @name Translation Functions
+  * @{
+  */
+
+// 将 Codeforces 常用英文头衔翻译为中文词汇
 static const char *translate_title(const char *title) {
     if (!title || !title[0]) return "";
     char t[64]; cstr(t, title, sizeof(t));
@@ -130,25 +186,16 @@ static void sort_labels(char labels[MAX_PROBS][4], int count) {
             }
 }
 
-static void fmt_time(char *buf, int64_t t) {
-    time_t tt = (time_t)t; struct tm tmv;
-    localtime_s(&tmv, &tt); strftime(buf, 64, "%Y-%m-%d %H:%M", &tmv);
-}
-
-static void parse_handles(char handles[][64], int *n, const char *src) {
-    char buf[4096]; cstr(buf, src, sizeof(buf));
-    for (char *tok = strtok(buf, " "); tok && *n < MAX_HANDLES; tok = strtok(NULL, " ")) {
-        cstr(handles[*n], tok, 64); if (handles[*n][0]) (*n)++;
-    }
-}
 
 int main(int argc, char **argv) {
+    // === 初始化：设定控制台编码UTF-8，以及全局初始化cURL ===
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleTitleA("Codeforces 用户信息查询");
     curl_global_init(CURL_GLOBAL_ALL);
 
     char handles[MAX_HANDLES][64]; int nhandles = 0;
 
+    // === 步骤 1：获取与解析输入的用户名 ===
     if (argc > 1) {
         for (int i = 1; i < argc && nhandles < MAX_HANDLES; i++) { cstr(handles[nhandles], argv[i], 64); if (handles[nhandles][0]) nhandles++; }
         printf("已读取到 %d 个用户\n", nhandles);
@@ -168,16 +215,19 @@ int main(int argc, char **argv) {
     if (!nhandles) { printf("未识别到有效的用户名\n"); return 1; }
 
     printf("\n=== 获取用户基本信息 ===\n");
+    // === 步骤 2：请求 user.info 取用户基本数据 ===
     char handle_list[4096] = "";
     for (int i = 0; i < nhandles; i++) { if (i) strcat(handle_list, ";"); strcat(handle_list, handles[i]); }
 
     UserInfo users[MAX_HANDLES]; int nusers = 0;
     char *s = NULL;
 
+    // 首先尝试拼接所有用户名进行一次批量请求
     for (int i = 0; i < 3 && !s; i++) { s = cf_api("https://codeforces.com/api/user.info?handles=%s", handle_list); if (!s) Sleep(1000 * (i + 1)); }
     nusers = parse_user_array(s, users, nhandles);
     free(s); s = NULL;
 
+    // 批量失败或结果不完整时，进行逐一请求
     if (!nusers) {
         for (int hi = 0; hi < nhandles; hi++) {
             for (int i = 0; i < 3 && !s; i++) { s = cf_api("https://codeforces.com/api/user.info?handles=%s", handles[hi]); if (!s) Sleep(500); }
@@ -195,6 +245,7 @@ int main(int argc, char **argv) {
     if (!nusers) { printf("未找到任何用户，请检查用户名\n"); return 1; }
 
     printf("\n=== 获取题目信息 ===\n");
+    // === 步骤 3：拉取 problemset.problems，建立题目对应其难度分数的映射 ===
     int *pmap_ids = NULL, *pmap_ratings = NULL, pmap_n = 0;
     char (*pmap_indices)[4] = NULL;
     s = cf_api("https://codeforces.com/api/problemset.problems");
@@ -216,6 +267,7 @@ int main(int argc, char **argv) {
         }
     }
 
+    // === 步骤 4：拉取 contest.list，映射每场比赛的时长与开始时间等属性 ===
     cJSON *cl_root = NULL, *cl_arr = NULL; int ncl = 0;
     s = cf_api("https://codeforces.com/api/contest.list?gym=false");
     if (s) {
@@ -224,6 +276,7 @@ int main(int argc, char **argv) {
     }
 
     printf("\n=== 获取用户详细数据 ===\n");
+    // === 步骤 5：按用户分别拉取 rating 记录与状态提交记录 ===
     Entry *entries[MAX_HANDLES]; int nentries[MAX_HANDLES];
     SolvedProb *solved[MAX_HANDLES]; int nsolved[MAX_HANDLES];
 
@@ -241,7 +294,8 @@ int main(int argc, char **argv) {
         cJSON *sub_arr = NULL; int nsub = 0;
         if (subj) { cJSON *res = cJSON_GetObjectItemCaseSensitive(subj, "result"); if (res && cJSON_IsArray(res)) { sub_arr = res; nsub = cJSON_GetArraySize(res); } }
 
-        // 单次遍历同时构建：subs[]（用于判断赛内/赛后）和 solved[]（去重 AC 题目）
+        // 解析并筛选出 verdict 为 "OK(通过)" 的提交；
+        // 同时构建：subs[]（用于判断某题是在赛内还是赛后过题）和 solved[]（用于统计各题难度分和图表去重）
         Sub *subs = malloc(sizeof(Sub) * (nsub > 0 ? nsub : 1)); int sub_cnt = 0;
         solved[ui] = calloc(MAX_SOLVED, sizeof(SolvedProb)); nsolved[ui] = 0;
         for (int i = 0; i < nsub; i++) {
@@ -263,6 +317,7 @@ int main(int argc, char **argv) {
         int64_t now = time(NULL);
         u->contestCount = n; u->cnt180 = 0; u->max180 = 0;
 
+        // 生成该用户参加过的比赛的 Entry 数组数据
         for (int i = 0; i < n; i++) {
             cJSON *x = rt_arr ? cJSON_GetArrayItem(rt_arr, i) : NULL; if (!x) continue;
             Entry *e = &entries[ui][i]; memset(e, 0, sizeof(*e));
@@ -293,7 +348,7 @@ int main(int argc, char **argv) {
         }
         printf("\n");
 
-        // 汇总赛内/赛后补题状态（calloc 已将 status[] 清零）
+        // 汇总赛内/赛后补题状态（根据比赛结束时间区分 1=赛中, 2=赛后）
         for (int i = 0; i < n; i++) {
             Entry *e = &entries[ui][i]; int64_t end = e->startTime + e->durationSeconds;
             for (int p = 0; p < sub_cnt; p++) {
@@ -309,6 +364,7 @@ int main(int argc, char **argv) {
     }
 
     printf("\n=== 生成报告 ===\n");
+    // === 步骤 6：生成用户列表主页 index.html ===
     FILE *fp = fopen("index.html", "w");
     if (!fp) { printf("无法写入 index.html\n"); return 1; }
 
@@ -338,15 +394,18 @@ int main(int argc, char **argv) {
     fprintf(fp, "</tbody></table></div></div></body></html>"); fclose(fp);
     printf("index.html 已生成\n");
 
+    // 取值分布：将题目难度划分为特定区间用于柱状图展示
     int ranges[] = {0, 800, 1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400, 2600, 2800, 3000, 3500};
     int nbins = sizeof(ranges)/sizeof(int) - 1;
     char *range_labels[] = {"<800","800-999","1000-1199","1200-1399","1400-1599","1600-1799","1800-1999","2000-2199","2200-2399","2400-2599","2600-2799","2800-2999","3000+"};
 
+    // === 步骤 7：为每位用户单独生成对应的数据报告 HTML (采用 ECharts 展现) ===
     for (int ui = 0; ui < nusers; ui++) {
         UserInfo *u = &users[ui]; Entry *eu = entries[ui]; int n = nentries[ui];
         char fn[128]; snprintf(fn, 128, "%s_report.html", u->handle);
         fp = fopen(fn, "w"); if (!fp) continue;
 
+        // 匹配已解决题目的难度分
         SolvedProb *su = solved[ui]; int ns = nsolved[ui];
         for (int i = 0; i < ns; i++) {
             char *us = strchr(su[i].problemId, '_'); if (!us) continue;
@@ -355,6 +414,7 @@ int main(int argc, char **argv) {
                 if (pmap_ids[k] == cid && strcmp(pmap_indices[k], idx) == 0) { su[i].rating = pmap_ratings[k]; break; }
         }
 
+        // 根据时间区间统计不同难度区间内的过题数量
         int64_t now = time(NULL), cy = now - 365*86400LL, c180 = now - 180*86400LL, cm = now - 30*86400LL;
         int ba[20]={0}, by[20]={0}, b180[20]={0}, bm[20]={0};
         for (int i = 0; i < ns; i++) {
@@ -366,6 +426,7 @@ int main(int argc, char **argv) {
             }
         }
 
+        // 输出单用户报告的头部基础结构和统计面板数据
         fprintf(fp, "<html><head><meta charset='utf-8'><title>%s - Codeforces Data</title><script src='https://cdn.jsdelivr.net/npm/echarts'></script><style>"
                     "*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background:#f3f4f6;color:#1f2937;padding:40px 20px}"
                     ".container{max-width:1200px;margin:0 auto}"
@@ -388,9 +449,10 @@ int main(int argc, char **argv) {
                     ".btn-active{background:#2563eb;color:#fff;box-shadow:0 2px 4px rgba(37,99,235,.2)}.btn-idle{background:#f1f5f9;color:#475569;border:1px solid #e2e8f0}.btn-idle:hover{background:#e2e8f0}"
                     "</style></head><body><div class='container'>", u->handle);
 
-        fprintf(fp, "<div class='card'><div style='display:flex;align-items:center;gap:20px;margin-bottom:12px'>"
+        fprintf(fp, "<div class='card' style='display:flex;flex-wrap:wrap;gap:40px;align-items:center;'><div style='display:flex;align-items:center;gap:20px;'>"
                     "<img src='%s' width='80' height='80' style='border-radius:50%%;border:3px solid %s;object-fit:cover'>"
-                    "<div><h1 style='color:%s;margin:0'>%s</h1><p style='color:%s;font-size:16px;margin-top:4px;font-weight:600'>%s %s</p></div></div><div class='stats'>"
+                    "<div><h1 style='color:%s;margin:0'>%s</h1><p style='color:%s;font-size:16px;margin-top:4px;font-weight:600'>%s %s</p></div></div>"
+                    "<div class='stats' style='flex:1;margin-top:0;grid-template-columns:repeat(3,1fr);min-width:400px;gap:16px;'>"
                     "<div class='stat'><div class='val' style='color:%s'>%d</div><div class='lbl'>当前等级分</div></div>"
                     "<div class='stat'><div class='val' style='color:%s'>%d</div><div class='lbl'>最高等级分</div></div>"
                     "<div class='stat'><div class='val'>%d</div><div class='lbl'>参赛次数</div></div>"
@@ -400,6 +462,7 @@ int main(int argc, char **argv) {
                 u->avatar, rcol(u->curRating), rcol(u->curRating), u->handle, rcol(u->curRating), u->title, translate_title(u->title),
                 rcol(u->curRating), u->curRating, rcol(u->maxRating), u->maxRating, u->contestCount, u->cnt180, rcol(u->max180), u->max180, ns);
 
+        // 使用 ECharts 绘制用户等级分变化的折线图
         fprintf(fp, "<div class='card'><h2>等级分变化</h2><div id='chart'></div></div><script>"
                     "var chart=echarts.init(document.getElementById('chart'));chart.setOption({backgroundColor:'transparent',"
                     "tooltip:{trigger:'axis'},grid:{left:60,right:20,bottom:30,top:20},"
@@ -411,6 +474,7 @@ int main(int argc, char **argv) {
         fprintf(fp, "],lineStyle:{width:3},symbol:'circle',symbolSize:6,itemStyle:{color:'#2563eb'},areaStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,"
                     "colorStops:[{offset:0,color:'rgba(37,99,235,.2)'},{offset:1,color:'rgba(37,99,235,0)'}]}}}]});</script>");
 
+        // 使用 ECharts 绘制各时间段下已解决题目难度分布的交互式柱状图
         fprintf(fp, "<div class='card'><h2>通过题目难度分布</h2><div class='btn-group'>"
                     "<button id='btn0' class='btn btn-active' onclick='switchHist(0)'>全部</button>"
                     "<button id='btn1' class='btn btn-idle' onclick='switchHist(1)'>最近一年</button>"
@@ -432,6 +496,7 @@ int main(int argc, char **argv) {
                     "yAxis:{type:'value',axisLabel:{color:'#6b7280'},splitLine:{color:'#f3f4f6'}},"
                     "series:[{type:'bar',data:histData[k],itemStyle:{color:'#3b82f6',borderRadius:[4,4,0,0]}}]});}switchHist(0);</script>");
 
+        // 输出历次比赛记录，通过颜色区分题目：赛内通过(绿色)、赛后补题(黄色)、未通过(灰色)
         fprintf(fp, "<div class='card' style='overflow-x:auto'><h2>比赛记录</h2><table><thead><tr>"
                     "<th>#</th><th>比赛</th><th>日期</th><th>排名</th><th>赛前</th><th>赛后</th><th>变化</th><th>题目</th>"
                     "</tr></thead><tbody>");
@@ -453,6 +518,7 @@ int main(int argc, char **argv) {
         printf("  %s 已生成\n", fn);
     }
 
+    // === 步骤 8：如有未找到的用户，生成 missing_users.html 报告未找到的用户名单 ===
     if (nmissing > 0) {
         fp = fopen("missing_users.html", "w");
         if (fp) {
@@ -467,11 +533,13 @@ int main(int argc, char **argv) {
         }
     }
 
+    // === 步骤 9：打开生成的默认主页报告页面 ===
     char cmd[256];
     if (nusers == 1) snprintf(cmd, sizeof(cmd), "start \"\" \"%s_report.html\"", users[0].handle);
     else cstr(cmd, "start \"\" \"index.html\"", sizeof(cmd));
     system(cmd);
 
+    // === 步骤 10：进行内存释放及所有的资源清理 ===
     for (int i = 0; i < nusers; i++) { free(entries[i]); free(solved[i]); }
     free(pmap_ids); free(pmap_ratings); free(pmap_indices);
     if (cl_root) cJSON_Delete(cl_root);
@@ -479,3 +547,5 @@ int main(int argc, char **argv) {
     printf("\n完成！打开 index.html 查看用户列表\n");
     return 0;
 }
+
+
