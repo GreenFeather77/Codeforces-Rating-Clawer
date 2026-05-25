@@ -51,7 +51,7 @@ static char *http_get(const char *url) {
     return b.buf;
 }
 
-// 封装的 Codeforces API 调用：支持类似 printf 的参数格式化后进行 GET 请求
+// 封装的 Codeforces API 调用
 static char *cf_api(const char *fmt, ...) {
     char url[512]; va_list ap; va_start(ap, fmt); vsnprintf(url, 512, fmt, ap); va_end(ap);
     return http_get(url);
@@ -162,7 +162,7 @@ static void sort_labels(char labels[MAX_PROBS][4], int count) {
 int main(int argc, char **argv) {
     // === 初始化：设定控制台编码UTF-8，以及全局初始化cURL ===
     SetConsoleOutputCP(CP_UTF8);
-    SetConsoleTitleA("Codeforces 用户信息查询");
+    SetConsoleTitleW(L"Codeforces 用户查询");
     curl_global_init(CURL_GLOBAL_ALL);
 
     char handles[MAX_HANDLES][64]; int nhandles = 0;
