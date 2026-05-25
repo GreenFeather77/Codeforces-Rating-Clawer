@@ -85,6 +85,25 @@ static const char *rcol(int r) {
     return "#808080";
 }
 
+static const char *translate_title(const char *title) {
+    if (!title || !title[0]) return "";
+    char t[64];
+    copy_str(t, title, sizeof(t));
+    for (int i = 0; t[i]; i++) if (t[i] >= 'A' && t[i] <= 'Z') t[i] += 32;
+    if (strstr(t, "world top")) return "世界顶尖";
+    if (strstr(t, "legendary grandmaster")) return "传奇特级大师";
+    if (strstr(t, "international grandmaster")) return "国际特级大师";
+    if (strstr(t, "grandmaster")) return "特级大师";
+    if (strstr(t, "international master")) return "国际大师";
+    if (strstr(t, "candidate master")) return "候选大师";
+    if (strstr(t, "master")) return "大师";
+    if (strstr(t, "expert")) return "行家";
+    if (strstr(t, "specialist")) return "专家";
+    if (strstr(t, "pupil")) return "学徒";
+    if (strstr(t, "newbie")) return "新手";
+    return "";
+}
+
 static void fmt_time(char *buf, int64_t t) { strftime(buf, 64, "%Y-%m-%d %H:%M", localtime((time_t*)&t)); }
 
 static const char *jstr_safe(cJSON *o, const char *k) {
@@ -129,17 +148,20 @@ int main(int argc, char **argv) {
             copy_str(handles[nhandles], argv[i], 64);
             if (handles[nhandles][0]) nhandles++;
         }
-        printf("从命令行读取到 %d 个用户\n", nhandles);
+        printf("已读取到 %d 个用户\n", nhandles);
     } else {
-        printf("输入 Codeforces 用户名（多个用空格分隔，一行）: ");
+        printf("Codeforces用户信息查询 \n");
+        printf("(支持多用户查询，如有多个用户，用户名之间使用空格间隔)\n");
+        printf("输入 Codeforces 用户名: \n");
+
         char buf[4096];
         if (!fgets(buf, sizeof(buf), stdin)) return 1;
         buf[strcspn(buf, "\n")] = 0;
         parse_handles(handles, &nhandles, buf);
     }
-    if (nhandles == 0) { printf("没有有效的用户名\n"); return 1; }
+    if (nhandles == 0) { printf("未识别到有效的用户名\n"); return 1; }
 
-    printf("\n=== 步骤 1: 获取用户基本信息 ===\n");
+    printf("\n=== 获取用户基本信息 ===\n");
     char handle_list[4096] = "";
     for (int i = 0; i < nhandles; i++) { if (i) strcat(handle_list, ";"); strcat(handle_list, handles[i]); }
     if (dbg_fp) { fprintf(dbg_fp, "handles: %s\n", handle_list); fflush(dbg_fp); }
@@ -225,7 +247,7 @@ int main(int argc, char **argv) {
     }
     if (nusers == 0) { printf("未找到任何用户，请检查用户名\n"); return 1; }
 
-    printf("\n=== 步骤 2: 获取题目难度信息 ===\n");
+    printf("\n=== 获取题目信息 ===\n");
     char *ps_json = cf_api("https://codeforces.com/api/problemset.problems");
     int *pmap_ids = NULL, *pmap_ratings = NULL, pmap_n = 0;
     char (*pmap_indices)[4] = NULL;
@@ -275,7 +297,7 @@ int main(int argc, char **argv) {
         free(cl_json_all);
     }
 
-    printf("\n=== 步骤 3: 获取每个用户的详细数据 ===\n");
+    printf("\n=== 获取用户详细数据 ===\n");
     Entry *entries[MAX_HANDLES]; int nentries[MAX_HANDLES];
     SolvedProb *solved[MAX_HANDLES]; int nsolved[MAX_HANDLES];
     Sub *user_subs_list[MAX_HANDLES]; int user_subs_cnt[MAX_HANDLES];
@@ -400,7 +422,7 @@ int main(int argc, char **argv) {
         if (rt) cJSON_Delete(rt);
     }
 
-    printf("\n=== 步骤 3.6: 汇总过题状态与赛后补题 ===\n");
+    printf("\n=== 汇总过题状态与赛后补题 ===\n");
     for (int ui = 0; ui < nusers; ui++) {
         Entry *eu = entries[ui];
         Sub *subs = user_subs_list[ui];
@@ -419,7 +441,7 @@ int main(int argc, char **argv) {
         free(subs);
     }
 
-    printf("\n=== 步骤 4: 生成报告 ===\n");
+    printf("\n=== 生成报告 ===\n");
     FILE *fp = fopen("index.html", "w");
     if (!fp) { printf("无法写入 index.html\n"); return 1; }
 
@@ -440,11 +462,11 @@ int main(int argc, char **argv) {
         UserInfo *u = &users[i];
         fprintf(fp, "<tr><td><img src='%s' width='40' height='40' style='border-radius:50%%;border:2px solid %s;object-fit:cover'></td>"
             "<td><a href='%s_report.html' style='color:%s;font-size:16px'>%s</a></td>"
-            "<td style='color:%s;font-weight:600'>%d</td><td style='color:%s;font-weight:600'>%d</td><td>%s</td><td>%d</td><td>%d</td><td style='color:%s;font-weight:600'>%d</td></tr>\n",
+            "<td style='color:%s;font-weight:600'>%d</td><td style='color:%s;font-weight:600'>%d</td><td style='color:%s;font-weight:600'>%s %s</td><td>%d</td><td>%d</td><td style='color:%s;font-weight:600'>%d</td></tr>\n",
             u->avatar, rcol(u->curRating),
             u->handle, rcol(u->curRating), u->handle,
             rcol(u->curRating), u->curRating, rcol(u->maxRating), u->maxRating,
-            u->title, u->contestCount, u->cnt180, rcol(u->max180), u->max180);
+            rcol(u->curRating), u->title, translate_title(u->title), u->contestCount, u->cnt180, rcol(u->max180), u->max180);
     }
     fprintf(fp, "</tbody></table></div></div></body></html>"); fclose(fp);
     printf("index.html 已生成\n");
@@ -505,14 +527,14 @@ int main(int argc, char **argv) {
 
         fprintf(fp, "<div class='card'><div style='display:flex;align-items:center;gap:20px;margin-bottom:12px'>"
             "<img src='%s' width='80' height='80' style='border-radius:50%%;border:3px solid %s;object-fit:cover'>"
-            "<div><h1 style='color:%s;margin:0'>%s</h1><p style='color:#6b7280;font-size:16px;margin-top:4px'>%s</p></div></div><div class='stats'>"
+            "<div><h1 style='color:%s;margin:0'>%s</h1><p style='color:%s;font-size:16px;margin-top:4px;font-weight:600'>%s %s</p></div></div><div class='stats'>"
             "<div class='stat'><div class='val' style='color:%s'>%d</div><div class='lbl'>当前 Rating</div></div>"
             "<div class='stat'><div class='val' style='color:%s'>%d</div><div class='lbl'>最高 Rating</div></div>"
             "<div class='stat'><div class='val'>%d</div><div class='lbl'>参赛次数</div></div>"
             "<div class='stat'><div class='val'>%d</div><div class='lbl'>近180天参赛</div></div>"
             "<div class='stat'><div class='val' style='color:%s'>%d</div><div class='lbl'>近180天最高</div></div>"
             "<div class='stat'><div class='val'>%d</div><div class='lbl'>通过题目数</div></div></div></div>",
-            u->avatar, rcol(u->curRating), rcol(u->curRating), u->handle, u->title, rcol(u->curRating), u->curRating, rcol(u->maxRating), u->maxRating,
+            u->avatar, rcol(u->curRating), rcol(u->curRating), u->handle, rcol(u->curRating), u->title, translate_title(u->title), rcol(u->curRating), u->curRating, rcol(u->maxRating), u->maxRating,
             u->contestCount, u->cnt180, rcol(u->max180), u->max180, ns);
 
         fprintf(fp, "<div class='card'><h2>Rating 变化</h2><div id='chart'></div></div><script>"
@@ -587,7 +609,11 @@ int main(int argc, char **argv) {
     /* Open index.html in default browser (use cmd start to avoid depending on shellapi header) */
     {
         char _cmd[256];
-        snprintf(_cmd, sizeof(_cmd), "start \"\" \"%s\"", "index.html");
+        if (nusers == 1) {
+            snprintf(_cmd, sizeof(_cmd), "start \"\" \"%s_report.html\"", users[0].handle);
+        } else {
+            snprintf(_cmd, sizeof(_cmd), "start \"\" \"%s\"", "index.html");
+        }
         system(_cmd);
     }
 
