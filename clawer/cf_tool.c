@@ -20,14 +20,10 @@ typedef struct { char handle[64], avatar[256], title[64]; int curRating, maxRati
 typedef struct { int contestId, durationSeconds, oldRating, newRating, rank, problemCount; int64_t startTime; char contestName[256], labels[MAX_PROBS][4]; int status[MAX_PROBS]; } Entry;
 // 存储单次提交记录的关键信息：比赛ID、提交时间和题目编号
 typedef struct { int contestId; int64_t time; char index[4]; } Sub;
-// 存储已解决题目(AC)的信息：拼接后的唯一题目ID、难度分及通过时间
+// 存储已解决题目的信息：拼接后的唯一题目ID、难度分及通过时间
 typedef struct { char problemId[32]; int rating; int64_t time; } SolvedProb;
 // 用于 cURL 动态内存分配的缓冲区结构
 typedef struct { char *buf; size_t len; } Buf;
-
-/** @name Codeforces API Helper Functions
-  * @{
-  */
 
 // libcurl 的写回调函数：将网络下载的数据自动拼接到 Buf 结构中
 static size_t write_cb(void *p, size_t sz, size_t n, void *u) {
