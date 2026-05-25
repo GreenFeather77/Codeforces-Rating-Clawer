@@ -540,9 +540,12 @@ int main(int argc, char **argv) {
 
         fprintf(fp, "<div class='card'><h2>Rating 变化</h2><div id='chart'></div></div><script>"
             "var chart=echarts.init(document.getElementById('chart'));chart.setOption({backgroundColor:'transparent',"
-            "tooltip:{trigger:'axis',formatter:function(p){return p[0].value}},grid:{left:60,right:20,bottom:30,top:20},"
+            "tooltip:{trigger:'axis'},grid:{left:60,right:20,bottom:30,top:20},"
             "xAxis:{type:'category',data:[");
-        for (int i = 0; i < n; i++) fprintf(fp, "'%d',", i+1);
+        for (int i = 0; i < n; i++) {
+            char tb[64]; fmt_time(tb, eu[i].startTime);
+            fprintf(fp, "'%s',", tb);
+        }
         fprintf(fp, "],axisLabel:{color:'#6b7280'},splitLine:{show:false}},yAxis:{type:'value',axisLabel:{color:'#6b7280'},splitLine:{color:'#f3f4f6'}},"
             "series:[{type:'line',smooth:true,data:[");
         for (int i = 0; i < n; i++) fprintf(fp, "%d,", eu[i].newRating);
