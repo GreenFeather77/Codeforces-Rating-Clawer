@@ -179,7 +179,7 @@ int main(int argc, char **argv) {
         print_colored("═══════════════════════════════════════════\n", FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_INTENSITY);
         print_colored("支持多用户查询，用户名之间使用空格间隔\n",   FOREGROUND_GREEN | FOREGROUND_INTENSITY);
         print_colored("最多可同时查询100名用户\n",                  FOREGROUND_RED);
-        print_colored("用户名不区分大小写\n",                       FOREGROUND_BLUE | FOREGROUND_INTENSITY);
+        print_colored("用户名不区分大小写\n\n",                       FOREGROUND_BLUE | FOREGROUND_INTENSITY);
         print_colored("请输入 Codeforces 用户名：\n\n",             FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY);
         char buf[4096];
         if (!fgets(buf, sizeof(buf), stdin)) return 1;
