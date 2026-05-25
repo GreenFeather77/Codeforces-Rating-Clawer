@@ -474,7 +474,7 @@ int main(int argc, char **argv) {
         fprintf(fp, "],lineStyle:{width:3},symbol:'circle',symbolSize:6,itemStyle:{color:'#2563eb'},areaStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,"
                     "colorStops:[{offset:0,color:'rgba(37,99,235,.2)'},{offset:1,color:'rgba(37,99,235,0)'}]}}}]});</script>");
 
-        // 使用 ECharts 绘制各时间段下已解决题目难度分布的交互式柱状图
+        // 使用 ECharts 绘制各时间段下已解决题目难度分布的柱状图
         fprintf(fp, "<div class='card'><h2>通过题目难度分布</h2><div class='btn-group'>"
                     "<button id='btn0' class='btn btn-active' onclick='switchHist(0)'>全部</button>"
                     "<button id='btn1' class='btn btn-idle' onclick='switchHist(1)'>最近一年</button>"
