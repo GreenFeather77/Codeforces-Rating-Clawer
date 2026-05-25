@@ -5,7 +5,6 @@
 #include <stdarg.h>
 #include <time.h>
 #include <windows.h>
-#include <shellapi.h>
 #include <curl/curl.h>
 #include "cJSON.h"
 
@@ -85,6 +84,22 @@ static const char *rcol(int r) {
     return "#808080";
 }
 
+static void print_console_colored(const char *text, WORD color) {
+#ifdef _WIN32
+    HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
+    CONSOLE_SCREEN_BUFFER_INFO info;
+    WORD oldColor = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE;
+    if (h != INVALID_HANDLE_VALUE && GetConsoleScreenBufferInfo(h, &info)) oldColor = info.wAttributes;
+    if (h != INVALID_HANDLE_VALUE) {
+        SetConsoleTextAttribute(h, color);
+        fputs(text, stdout);
+        SetConsoleTextAttribute(h, oldColor);
+        return;
+    }
+#endif
+    fputs(text, stdout);
+}
+
 static void copy_str(char *dst, const char *src, size_t dst_size) {
     if (!dst || dst_size == 0) return;
     if (!src) { dst[0] = '\0'; return; }
@@ -145,6 +160,7 @@ static void parse_handles(char handles[][64], int *n, const char *src) {
 
 int main(int argc, char **argv) {
     SetConsoleOutputCP(CP_UTF8);
+    SetConsoleTitleA("Codeforces 用户信息查询");
     curl_global_init(CURL_GLOBAL_ALL);
     dbg_fp = fopen("cf_tool_debug.log", "w");
     if (dbg_fp) {
@@ -161,12 +177,15 @@ int main(int argc, char **argv) {
         }
         printf("已读取到 %d 个用户\n", nhandles);
     } else {
-        printf("Codeforces用户信息查询 \n");
-
-        printf("(支持多用户查询，如有多个用户，用户名之间使用空格间隔)\n");
-        printf("(最多可同时查询100名用户) \n");
-        printf("(用户名不区分大小写) \n");
-        printf("输入 Codeforces 用户名: \n");
+        printf("\n");
+        print_console_colored("════════════════════════════════════════\n", FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+        print_console_colored("          Codeforces 用户信息查询        \n", FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+        print_console_colored("════════════════════════════════════════\n", FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+        print_console_colored("支持多用户查询，用户名之间使用空格间隔\n", FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+        print_console_colored("最多可同时查询100名用户\n", FOREGROUND_RED);
+        print_console_colored("用户名不区分大小写\n", FOREGROUND_BLUE | FOREGROUND_INTENSITY);
+        print_console_colored("请输入 Codeforces 用户名：", FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+        printf("\n\n");
 
         char buf[4096];
         if (!fgets(buf, sizeof(buf), stdin)) return 1;
@@ -499,7 +518,11 @@ int main(int argc, char **argv) {
         SolvedProb *su = solved[ui];
         int ns = nsolved[ui];
         for (int i = 0; i < ns; i++) {
-            int cid = 0; char idx[8] = ""; sscanf(su[i].problemId, "%d_%s", &cid, idx);
+            int cid = 0;
+            char *endp = NULL;
+            cid = (int)strtol(su[i].problemId, &endp, 10);
+            char idx[8] = "";
+            if (endp && *endp == '_') copy_str(idx, endp + 1, sizeof(idx));
             for (int k = 0; k < pmap_n; k++) {
                 char pc[32]; snprintf(pc, 32, "%d_%s", pmap_ids[k], idx);
                 if (strcmp(su[i].problemId, pc) == 0) { su[i].rating = pmap_ratings[k]; break; }
