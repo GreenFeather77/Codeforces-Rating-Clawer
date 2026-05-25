@@ -24,7 +24,9 @@
   </component>
   <component name="CMakeWorkspace" PROJECT_DIR="$PROJECT_DIR$" />
   <component name="ChangeListManager">
-    <list default="true" id="afaa23a0-99de-4db9-9a53-53570a655725" name="更改" comment="3.0" />
+    <list default="true" id="afaa23a0-99de-4db9-9a53-53570a655725" name="更改" comment="3.1">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -49,8 +51,8 @@
   </component>
   <component name="CopilotUserSelectedModel">
     <selectedModels>
-      <entry key="chat-panel" value="GPT-5.2-Codex" />
-      <entry key="agent-panel" value="GPT-5.2-Codex" />
+      <entry key="chat-panel" value="Gemini 3.1 Pro" />
+      <entry key="agent-panel" value="Gemini 3.1 Pro" />
     </selectedModels>
   </component>
   <component name="ExecutionTargetManager" SELECTED_TARGET="CMakeBuildProfile:Debug" />
@@ -123,7 +125,8 @@
       <workItem from="1779417413709" duration="6509000" />
       <workItem from="1779452324266" duration="2933000" />
       <workItem from="1779677787864" duration="4802000" />
-      <workItem from="1779684078851" duration="1481000" />
+      <workItem from="1779684078851" duration="1530000" />
+      <workItem from="1779699771634" duration="1262000" />
     </task>
     <task id="LOCAL-00001" summary="1.0">
       <option name="closed" value="true" />
@@ -197,7 +200,15 @@
       <option name="project" value="LOCAL" />
       <updated>1779684854432</updated>
     </task>
-    <option name="localTasksCounter" value="10" />
+    <task id="LOCAL-00010" summary="3.1">
+      <option name="closed" value="true" />
+      <created>1779686450664</created>
+      <option name="number" value="00010" />
+      <option name="presentableId" value="LOCAL-00010" />
+      <option name="project" value="LOCAL" />
+      <updated>1779686450664</updated>
+    </task>
+    <option name="localTasksCounter" value="11" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -227,7 +238,8 @@
     <MESSAGE value="2.3" />
     <MESSAGE value="2.5" />
     <MESSAGE value="3.0" />
-    <option name="LAST_COMMIT_MESSAGE" value="3.0" />
+    <MESSAGE value="3.1" />
+    <option name="LAST_COMMIT_MESSAGE" value="3.1" />
   </component>
   <component name="github-copilot-workspace">
     <instructionFileLocations>

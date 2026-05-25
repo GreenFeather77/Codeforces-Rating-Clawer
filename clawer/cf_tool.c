@@ -76,23 +76,19 @@ static const char *jstr(cJSON *o, const char *k) {
     cJSON *it = o ? cJSON_GetObjectItemCaseSensitive(o, k) : NULL;
     return (it && cJSON_IsString(it) && it->valuestring) ? it->valuestring : "";
 }
-#define JNUM(o,k) (cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(o,k)) ? cJSON_GetObjectItemCaseSensitive(o,k)->valueint : 0)
+
+static int jnum(cJSON *o, const char *k) {
+    cJSON *it = o ? cJSON_GetObjectItemCaseSensitive(o, k) : NULL;
+    return (it && cJSON_IsNumber(it)) ? it->valueint : 0;
+}
 
 static const char *translate_title(const char *title) {
     if (!title || !title[0]) return "";
     char t[64]; cstr(t, title, sizeof(t));
     for (int i = 0; t[i]; i++) if (t[i] >= 'A' && t[i] <= 'Z') t[i] += 32;
-    if (strstr(t, "world top"))                 return "世界顶尖";
-    if (strstr(t, "legendary grandmaster"))      return "传奇特级大师";
-    if (strstr(t, "international grandmaster"))  return "国际特级大师";
-    if (strstr(t, "grandmaster"))                return "特级大师";
-    if (strstr(t, "international master"))       return "国际大师";
-    if (strstr(t, "candidate master"))           return "候选大师";
-    if (strstr(t, "master"))                     return "大师";
-    if (strstr(t, "expert"))                     return "行家";
-    if (strstr(t, "specialist"))                 return "专家";
-    if (strstr(t, "pupil"))                      return "学徒";
-    if (strstr(t, "newbie"))                     return "新手";
+    const char *en[] = {"world top", "legendary grandmaster", "international grandmaster", "grandmaster", "international master", "candidate master", "master", "expert", "specialist", "pupil", "newbie"};
+    const char *zh[] = {"世界顶尖", "传奇特级大师", "国际特级大师", "特级大师", "国际大师", "候选大师", "大师", "行家", "专家", "学徒", "新手"};
+    for (int i = 0; i < 11; i++) if (strstr(t, en[i])) return zh[i];
     return "";
 }
 
@@ -102,7 +98,7 @@ static int fill_user(UserInfo *p, cJSON *u) {
     cstr(p->handle, h, sizeof(p->handle));
     cstr(p->avatar, jstr(u, "titlePhoto"), sizeof(p->avatar));
     if (!p->avatar[0]) cstr(p->avatar, jstr(u, "avatar"), sizeof(p->avatar));
-    p->curRating = JNUM(u, "rating"); p->maxRating = JNUM(u, "maxRating");
+    p->curRating = jnum(u, "rating"); p->maxRating = jnum(u, "maxRating");
     cstr(p->title, jstr(u, "rank"), sizeof(p->title));
     return 1;
 }
@@ -134,7 +130,10 @@ static void sort_labels(char labels[MAX_PROBS][4], int count) {
             }
 }
 
-static void fmt_time(char *buf, int64_t t) { strftime(buf, 64, "%Y-%m-%d %H:%M", localtime((time_t*)&t)); }
+static void fmt_time(char *buf, int64_t t) {
+    time_t tt = (time_t)t; struct tm tmv;
+    localtime_s(&tmv, &tt); strftime(buf, 64, "%Y-%m-%d %H:%M", &tmv);
+}
 
 static void parse_handles(char handles[][64], int *n, const char *src) {
     char buf[4096]; cstr(buf, src, sizeof(buf));
@@ -175,7 +174,6 @@ int main(int argc, char **argv) {
     UserInfo users[MAX_HANDLES]; int nusers = 0;
     char *s = NULL;
 
-    /* 批量请求，失败则逐个重试 */
     for (int i = 0; i < 3 && !s; i++) { s = cf_api("https://codeforces.com/api/user.info?handles=%s", handle_list); if (!s) Sleep(1000 * (i + 1)); }
     nusers = parse_user_array(s, users, nhandles);
     free(s); s = NULL;
@@ -210,8 +208,8 @@ int main(int argc, char **argv) {
                 pmap_ids = malloc(sizeof(int) * sz); pmap_ratings = malloc(sizeof(int) * sz); pmap_indices = malloc(sizeof(char[4]) * sz);
                 for (int i = 0; i < sz; i++) {
                     cJSON *p = cJSON_GetArrayItem(probs, i);
-                    int cid = JNUM(p, "contestId"); const char *idx = jstr(p, "index");
-                    if (cid && idx[0]) { pmap_ids[pmap_n] = cid; pmap_ratings[pmap_n] = JNUM(p, "rating"); cstr(pmap_indices[pmap_n], idx, 4); pmap_n++; }
+                    int cid = jnum(p, "contestId"); const char *idx = jstr(p, "index");
+                    if (cid && idx[0]) { pmap_ids[pmap_n] = cid; pmap_ratings[pmap_n] = jnum(p, "rating"); cstr(pmap_indices[pmap_n], idx, 4); pmap_n++; }
                 }
             }
             cJSON_Delete(ps);
@@ -228,7 +226,6 @@ int main(int argc, char **argv) {
     printf("\n=== 获取用户详细数据 ===\n");
     Entry *entries[MAX_HANDLES]; int nentries[MAX_HANDLES];
     SolvedProb *solved[MAX_HANDLES]; int nsolved[MAX_HANDLES];
-    Sub *user_subs[MAX_HANDLES]; int user_subs_cnt[MAX_HANDLES];
 
     for (int ui = 0; ui < nusers; ui++) {
         UserInfo *u = &users[ui];
@@ -244,36 +241,22 @@ int main(int argc, char **argv) {
         cJSON *sub_arr = NULL; int nsub = 0;
         if (subj) { cJSON *res = cJSON_GetObjectItemCaseSensitive(subj, "result"); if (res && cJSON_IsArray(res)) { sub_arr = res; nsub = cJSON_GetArraySize(res); } }
 
+        // 单次遍历同时构建：subs[]（用于判断赛内/赛后）和 solved[]（去重 AC 题目）
         Sub *subs = malloc(sizeof(Sub) * (nsub > 0 ? nsub : 1)); int sub_cnt = 0;
-        for (int i = 0; i < nsub; i++) {
-            cJSON *x = cJSON_GetArrayItem(sub_arr, i); if (!x) continue;
-            int cid = JNUM(x, "contestId");
-            cJSON *ct = cJSON_GetObjectItemCaseSensitive(x, "creationTimeSeconds");
-            int64_t tm = (ct && cJSON_IsNumber(ct)) ? (int64_t)ct->valuedouble : 0;
-            cJSON *pr = cJSON_GetObjectItemCaseSensitive(x, "problem");
-            const char *ix = pr ? jstr(pr, "index") : "";
-            if (cid && tm && ix[0] && strcmp(jstr(x, "verdict"), "OK") == 0) {
-                subs[sub_cnt].contestId = cid; subs[sub_cnt].time = tm;
-                cstr(subs[sub_cnt].index, ix, sizeof(subs[sub_cnt].index)); sub_cnt++;
-            }
-        }
-        user_subs[ui] = subs; user_subs_cnt[ui] = sub_cnt;
-
         solved[ui] = calloc(MAX_SOLVED, sizeof(SolvedProb)); nsolved[ui] = 0;
         for (int i = 0; i < nsub; i++) {
-            cJSON *x = cJSON_GetArrayItem(sub_arr, i); if (!x) continue;
-            if (strcmp(jstr(x, "verdict"), "OK") != 0) continue;
-            int cid = JNUM(x, "contestId");
+            cJSON *x = cJSON_GetArrayItem(sub_arr, i);
+            if (!x || strcmp(jstr(x, "verdict"), "OK") != 0) continue;
+            int cid = jnum(x, "contestId");
             cJSON *pr = cJSON_GetObjectItemCaseSensitive(x, "problem");
             const char *ix = pr ? jstr(pr, "index") : "";
+            cJSON *ct = cJSON_GetObjectItemCaseSensitive(x, "creationTimeSeconds");
+            int64_t tm = (ct && cJSON_IsNumber(ct)) ? (int64_t)ct->valuedouble : 0;
             if (!cid || !ix[0]) continue;
+            if (tm) { subs[sub_cnt].contestId = cid; subs[sub_cnt].time = tm; cstr(subs[sub_cnt].index, ix, 4); sub_cnt++; }
             char pid[32]; snprintf(pid, 32, "%d_%s", cid, ix);
             int dup = 0; for (int j = 0; j < nsolved[ui]; j++) if (strcmp(solved[ui][j].problemId, pid) == 0) { dup = 1; break; }
-            if (dup) continue;
-            cstr(solved[ui][nsolved[ui]].problemId, pid, sizeof(solved[ui][nsolved[ui]].problemId));
-            cJSON *ct2 = cJSON_GetObjectItemCaseSensitive(x, "creationTimeSeconds");
-            solved[ui][nsolved[ui]].time = (ct2 && cJSON_IsNumber(ct2)) ? (int64_t)ct2->valuedouble : 0;
-            nsolved[ui]++;
+            if (!dup && nsolved[ui] < MAX_SOLVED) { cstr(solved[ui][nsolved[ui]].problemId, pid, 32); solved[ui][nsolved[ui]].time = tm; nsolved[ui]++; }
         }
 
         entries[ui] = calloc(n > 0 ? n : 1, sizeof(Entry)); nentries[ui] = n;
@@ -283,15 +266,15 @@ int main(int argc, char **argv) {
         for (int i = 0; i < n; i++) {
             cJSON *x = rt_arr ? cJSON_GetArrayItem(rt_arr, i) : NULL; if (!x) continue;
             Entry *e = &entries[ui][i]; memset(e, 0, sizeof(*e));
-            int cid = JNUM(x, "contestId");
-            e->contestId = cid; e->oldRating = JNUM(x, "oldRating"); e->newRating = JNUM(x, "newRating"); e->rank = JNUM(x, "rank");
+            int cid = jnum(x, "contestId");
+            e->contestId = cid; e->oldRating = jnum(x, "oldRating"); e->newRating = jnum(x, "newRating"); e->rank = jnum(x, "rank");
             cstr(e->contestName, jstr(x, "contestName"), sizeof(e->contestName));
             cJSON *rt_time = cJSON_GetObjectItemCaseSensitive(x, "ratingUpdateTimeSeconds");
             e->startTime = (rt_time && cJSON_IsNumber(rt_time)) ? (int64_t)rt_time->valuedouble : 0;
             e->durationSeconds = 7200;
 
             for (int k = 0; k < ncl; k++) {
-                cJSON *cl = cJSON_GetArrayItem(cl_arr, k); if (!cl || JNUM(cl, "id") != cid) continue;
+                cJSON *cl = cJSON_GetArrayItem(cl_arr, k); if (!cl || jnum(cl, "id") != cid) continue;
                 cJSON *dur = cJSON_GetObjectItemCaseSensitive(cl, "durationSeconds");
                 cJSON *stm = cJSON_GetObjectItemCaseSensitive(cl, "startTimeSeconds");
                 if (dur && cJSON_IsNumber(dur)) e->durationSeconds = dur->valueint;
@@ -309,16 +292,10 @@ int main(int argc, char **argv) {
             printf("  %d/%d\r", i + 1, n); fflush(stdout);
         }
         printf("\n");
-        if (rt)   cJSON_Delete(rt);
-        if (subj) cJSON_Delete(subj);
-    }
 
-    printf("\n=== 汇总过题状态与赛后补题 ===\n");
-    for (int ui = 0; ui < nusers; ui++) {
-        Entry *eu = entries[ui]; Sub *subs = user_subs[ui]; int sub_cnt = user_subs_cnt[ui];
-        for (int i = 0; i < nentries[ui]; i++) {
-            Entry *e = &eu[i]; int64_t end = e->startTime + e->durationSeconds;
-            for (int p = 0; p < e->problemCount; p++) e->status[p] = 0;
+        // 汇总赛内/赛后补题状态（calloc 已将 status[] 清零）
+        for (int i = 0; i < n; i++) {
+            Entry *e = &entries[ui][i]; int64_t end = e->startTime + e->durationSeconds;
             for (int p = 0; p < sub_cnt; p++) {
                 if (subs[p].contestId != e->contestId) continue;
                 for (int k = 0; k < e->problemCount; k++)
@@ -326,6 +303,9 @@ int main(int argc, char **argv) {
             }
         }
         free(subs);
+
+        if (rt)   cJSON_Delete(rt);
+        if (subj) cJSON_Delete(subj);
     }
 
     printf("\n=== 生成报告 ===\n");
@@ -488,8 +468,8 @@ int main(int argc, char **argv) {
     }
 
     char cmd[256];
-    snprintf(cmd, sizeof(cmd), "start \"\" \"%s\"", nusers == 1 ? "index.html" : "index.html");
     if (nusers == 1) snprintf(cmd, sizeof(cmd), "start \"\" \"%s_report.html\"", users[0].handle);
+    else cstr(cmd, "start \"\" \"index.html\"", sizeof(cmd));
     system(cmd);
 
     for (int i = 0; i < nusers; i++) { free(entries[i]); free(solved[i]); }
