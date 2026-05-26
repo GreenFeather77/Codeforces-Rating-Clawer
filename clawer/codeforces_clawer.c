@@ -175,7 +175,7 @@ int main(int argc, char **argv) {
         print_colored("═══════════════════════════════════════════\n", FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_INTENSITY);
         print_colored("          Codeforces 用户信息查询        \n", FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_INTENSITY);
         print_colored("═══════════════════════════════════════════\n", FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_INTENSITY);
-        print_colored("    湘潭大学  2025级计算机科学与技术1班   陈羽\n",  FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+        print_colored(" 湘潭大学 2025级计算机科学与技术1班 陈羽\n",  FOREGROUND_GREEN | FOREGROUND_INTENSITY);
         print_colored("═══════════════════════════════════════════\n", FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_INTENSITY);
         print_colored("支持多用户查询，用户名之间使用空格间隔\n",   FOREGROUND_GREEN | FOREGROUND_INTENSITY);
         print_colored("最多可同时查询100名用户\n",                  FOREGROUND_RED);
@@ -186,7 +186,7 @@ int main(int argc, char **argv) {
         buf[strcspn(buf, "\n")] = 0;
         parse_handles(handles, &nhandles, buf);
     }
-    if (!nhandles) { printf("未识别到有效的用户名\n"); return 1; }
+    if (!nhandles) { printf("\n未识别到有效的用户名\n"); system("pause"); return 1; }
 
     printf("\n=== 获取用户基本信息 ===\n");
     // === 请求 user.info 取用户基本数据 ===
@@ -201,8 +201,11 @@ int main(int argc, char **argv) {
     nusers = parse_user_array(s, users, nhandles);
     free(s); s = NULL;
 
-    // 批量失败或结果不完整时，进行逐一请求
-    if (!nusers) {
+    char missing[MAX_HANDLES][64]; int nmissing = 0;
+
+    // 如果批量请求未能获得全部用户的返回结果（例如其中包含无效账号），则逐个查询
+    if (nusers != nhandles) {
+        nusers = 0;
         for (int hi = 0; hi < nhandles; hi++) {
             for (int i = 0; i < 3 && !s; i++) { s = cf_api("https://codeforces.com/api/user.info?handles=%s", handles[hi]); if (!s) Sleep(500); }
             nusers += parse_user_array(s, users + nusers, 1);
@@ -210,13 +213,24 @@ int main(int argc, char **argv) {
         }
     }
 
-    char missing[MAX_HANDLES][64]; int nmissing = 0;
+    int valid_nusers = 0;
     for (int hi = 0; hi < nhandles; hi++) {
         int found = 0;
-        for (int ui = 0; ui < nusers; ui++) if (_stricmp(handles[hi], users[ui].handle) == 0) { found = 1; break; }
-        if (!found) { printf("未找到用户: %s\n", handles[hi]); cstr(missing[nmissing++], handles[hi], 64); }
+        for (int ui = 0; ui < nusers; ui++) {
+            if (_stricmp(handles[hi], users[ui].handle) == 0) {
+                users[valid_nusers++] = users[ui]; // 保证留下的是符合输入的名字
+                found = 1;
+                break;
+            }
+        }
+        if (!found) {
+            printf("未找到用户: %s\n", handles[hi]);
+            cstr(missing[nmissing++], handles[hi], 64);
+        }
     }
-    if (!nusers) { printf("未找到任何用户，请检查用户名\n"); return 1; }
+    nusers = valid_nusers;
+
+    if (nhandles == 1 && !nusers) { printf("\n该用户不存在，检查用户名是否输入正确\n"); system("pause"); return 1; }
 
     printf("\n=== 获取题目信息 ===\n");
     // === 拉取 problemset.problems，建立题目对应其难度分数的映射 ===
@@ -350,10 +364,15 @@ int main(int argc, char **argv) {
                 "th{background:#f9fafb;padding:16px;text-align:left;font-weight:600;color:#374151;border-bottom:2px solid #e5e7eb;text-transform:uppercase;font-size:12px;letter-spacing:.05em}"
                 "td{padding:16px;border-bottom:1px solid #e5e7eb;vertical-align:middle}tr:last-child td{border-bottom:none}tr:hover td{background:#f9fafb}"
                 "td a{color:#2563eb;text-decoration:none;font-weight:600}td a:hover{color:#1d4ed8;text-decoration:underline}</style></head><body>"
-                "<div class='container'><div class='card'><h1>Codeforces 用户列表</h1><p style='color:#6b7280;font-size:15px'>共 %d 个用户 | 数据来源: Codeforces API</p><p style='color:#6b7280;font-size:15px'>点击用户名查看详情</p></div>"
-                "<div class='card' style='overflow-x:auto'><table><thead><tr>"
+                "<div class='container'><div class='card'><h1>Codeforces 用户列表</h1><p style='color:#6b7280;font-size:15px'>共 %d 个用户 | 数据来源: Codeforces API</p><p style='color:#6b7280;font-size:15px'>点击用户名查看详情</p>", nusers);
+    if (nmissing > 0) {
+        fprintf(fp, "<p style='color:#ef4444;font-size:15px;margin-top:8px;font-weight:600'>未找到以下用户的: ");
+        for (int i = 0; i < nmissing; i++) fprintf(fp, "%s%s", missing[i], i < nmissing - 1 ? ", " : "");
+        fprintf(fp, "</p>");
+    }
+    fprintf(fp, "</div><div class='card' style='overflow-x:auto'><table><thead><tr>"
                 "<th>头像</th><th>用户</th><th>当前等级分</th><th>最高等级分</th><th>头衔</th><th>参赛次数</th><th>近180天参赛</th><th>近180天最高</th>"
-                "</tr></thead><tbody>", nusers);
+                "</tr></thead><tbody>");
 
     for (int i = 0; i < nusers; i++) {
         UserInfo *u = &users[i];
@@ -492,20 +511,6 @@ int main(int argc, char **argv) {
         printf("  %s 已生成\n", fn);
     }
 
-    // === 如有未找到的用户，生成 missing_users.html 报告未找到的用户名单 ===
-    if (nmissing > 0) {
-        fp = fopen("missing_users.html", "w");
-        if (fp) {
-            fprintf(fp, "<html><head><meta charset='utf-8'><title>Missing Users</title><style>"
-                        "*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background:#f3f4f6;color:#1f2937;padding:40px}"
-                        ".card{max-width:600px;margin:0 auto;background:#fff;padding:32px;border-radius:16px;box-shadow:0 4px 6px -1px rgba(0,0,0,.1);border:1px solid #e5e7eb}"
-                        "h1{font-size:24px;margin-bottom:16px;color:#ef4444}ul{list-style-type:disc;padding-left:24px}li{margin-bottom:8px;font-size:16px;color:#4b5563}"
-                        "</style></head><body><div class='card'><h1>以下用户未找到</h1><ul>");
-            for (int i = 0; i < nmissing; i++) fprintf(fp, "<li>%s</li>", missing[i]);
-            fprintf(fp, "</ul></div></body></html>"); fclose(fp);
-            printf("missing_users.html 已生成\n");
-        }
-    }
 
     // === 打开生成的默认主页报告页面 ===
     char cmd[256];
